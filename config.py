@@ -11,7 +11,7 @@ class SimulationConfig:
     # SENSOR PARAMETERS
     n_sensor_1d: int = 10
     n_mf : int = 100                            # 센서 개수     
-    max_firing_rate: float = 100               # 센서 최대 발화율 (Hz)
+    max_firing_rate: float = 200               # 센서 최대 발화율 (Hz)
     transmitt_speed: float = 50                 # 신경 전송 속도 [m/s]
     sigma: float = 0.05                   # 센서 노이즈 표준편차
 
@@ -21,7 +21,7 @@ class SimulationConfig:
     tau_e_ms: float = 50                        # 시냅스 효율 시간상수 (s)
     tau: float = 2.0
 
-    n_grc: int = 4 # num_filters, *36
+    n_grc: int = 8 # num_filters, *36
     n_goc: int = 2
     n_pkj: int = 1
     n_mli: int = 2
@@ -39,7 +39,7 @@ class SimulationConfig:
 
     # TRAINING PARAMETERS
 
-    weight_init: str = "xavier"
+    weight_init: str = "kaiming"
     # every reward scale is per second
     simulation_duration_s: float = 5.0         # 각 에피소드 시뮬레이션 시간 (초)
     success_duration_s: float = 3.0             # 성공으로 간주할 연속 시간 (초)

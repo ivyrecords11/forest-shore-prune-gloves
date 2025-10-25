@@ -190,7 +190,7 @@ class CerebellarCNNAC2(nn.Module):
             neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan(), detach_reset=True),
             nn.Flatten(),
             nn.Linear(self.n_grc, n_motor, bias = False),
-            neuron.LIFNode(tau = tau)
+            NonSpikingLIFNode(tau = tau)
         )
         self.log_std = nn.Parameter(torch.ones(1, 4) * std)
         self.log = log
@@ -263,7 +263,10 @@ class CerebellarCNNAC2(nn.Module):
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+class CerebellarCNN(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.cnn1 = nn.Conv2d(1, cfg.n_grc, kernel_size = 3, stride = 1, padding='same', bias = True)
 class CerebellarNet(nn.Module):
     """
     Pipeline

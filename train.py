@@ -362,7 +362,7 @@ class CerebellarNet(nn.Module):
             if isinstance(m, nn.Linear):
                 nn.init.normal_(m.weight, 4.0, 0.1)
 
-    def forward(self, mf: torch.Tensor, cf: torch.Tensor) -> torch.Tensor:
+    def actor(self, mf: torch.Tensor) -> torch.Tensor: #, cf: torch.Tensor
         """
         Args:
             mf: (N, 1, 10, 10)
@@ -388,9 +388,9 @@ class CerebellarNet(nn.Module):
         # pkj pre-activation maps (all 4x4)
         grc2pkj = self.grc2pkj(grc)         # (N, n_pkj, 4, 4)
         mli2pkj = self.mli2pkj(mli)         # (N, n_pkj, 4, 4)
-        cf2pkj  = self.cf2pkj(cf).view(cf.shape[0], -1, 4, 4)  # (N, n_pkj, 4, 4)
+        #cf2pkj  = self.cf2pkj(cf).view(cf.shape[0], -1, 4, 4)  # (N, n_pkj, 4, 4)
 
-        pkj_pre = grc2pkj - mli2pkj - cf2pkj  # (N, n_pkj, 4, 4)
+        pkj_pre = grc2pkj - mli2pkj #- cf2pkj  # (N, n_pkj, 4, 4)
         pkj_act = self.pkj(pkj_pre)           # (N, n_pkj, 4, 4)
         pkj_2x2 = F.avg_pool2d(pkj_act, kernel_size=2, stride=2)  # (N, n_pkj, 2, 2)  # NEW
 
@@ -400,7 +400,45 @@ class CerebellarNet(nn.Module):
         # If you need critic output, compute here and return both
         # critic   = self.pkj2critic(flat_pkj)
 
-        return motor.v, {"goc_4x4": goc_4x4, "pkj_2x2": pkj_2x2}  # exposing pooled maps for debugging
+        return motor#.v, {"goc_4x4": goc_4x4, "pkj_2x2": pkj_2x2}  # exposing pooled maps for debugging
+        
+    def critic(self, mf: torch.Tensor) -> torch.Tensor: #, cf: torch.Tensor
+
+        assert mf.dim() == 4 and mf.shape[-2:] == (10, 10), "mf must be (N,1,10,10)"
+
+        # goc branch
+        goc_raw = self.mf2goc(mf)           # (N, n_goc, 8, 8)
+        goc     = self.goc(goc_raw)         # spiking activation
+        goc_4x4 = F.avg_pool2d(goc, kernel_size=2, stride=2)  # (N, n_goc, 4, 4)  # NEW
+        # grc
+        mf2grc  = self.mf2grc(mf)           # (N, n_grc, 6, 6)
+        goc2grc = self.goc2grc(goc)         # (N, n_grc, 6, 6)
+        grc     = self.grc(mf2grc - goc2grc)# (N, n_grc, 6, 6)
+
+        # mli
+        mli_pre = self.grc2mli(grc)         # (N, n_mli, 4, 4)
+        mli     = self.mli(mli_pre)         # (N, n_mli, 4, 4)
+
+        # pkj pre-activation maps (all 4x4)
+        grc2pkj = self.grc2pkj(grc)         # (N, n_pkj, 4, 4)
+        mli2pkj = self.mli2pkj(mli)         # (N, n_pkj, 4, 4)
+        #cf2pkj  = self.cf2pkj(cf).view(cf.shape[0], -1, 4, 4)  # (N, n_pkj, 4, 4)
+
+        pkj_pre = grc2pkj - mli2pkj #- cf2pkj  # (N, n_pkj, 4, 4)
+        pkj_act = self.pkj(pkj_pre)           # (N, n_pkj, 4, 4)
+        pkj_2x2 = F.avg_pool2d(pkj_act, kernel_size=2, stride=2)  # (N, n_pkj, 2, 2)  # NEW
+
+        # motor / critic heads
+        flat_pkj = pkj_2x2.reshape(pkj_2x2.shape[0], -1)  # (N, n_pkj*2*2)
+        critic   = self.pkj2critic(flat_pkj)
+
+        return critic
+    def forward(self, mf: torch.Tensor) -> torch.Tensor:
+        actor = actor(mf)
+        critic = critic(mf)
+        value = critic.v
+        mu = actor.v
+        std = self.
 
 
 """

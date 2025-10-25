@@ -15,7 +15,9 @@ from spikingjelly.activation_based import functional, neuron, surrogate, monitor
 from datetime import datetime
 
 DEBUG = True
-cfg = SimulationConfig()
+cfg = SimulationConfig(
+    simulation_duration_s=5.0
+)
 
 class NonSpikingLIFNode(neuron.LIFnode):
     def forward(self, dv: torch.Tensor):
@@ -30,10 +32,16 @@ class CerebellarCNN(nn.Module):
             neuron.LIFNode(tau=cfg.tau, surrogate_function=surrogate.ATan(), detach_reset=True),
             nn.Flatten(),
             nn.Linear(in_features = self.n_grc, out_features = cfg.n_motor, bias = False),
-            #NonSpikingLIFNode(tau = tau)
+            NonSpikingLIFNode(tau = tau)
         )
     def forward(self, x):
         for t in range(cfg.T):
             self.fc(x)
         
         return self.fc[-1].v
+
+def train(max_epochs):
+    
+
+if __name__=="__main__":
+    train(max_epochs=50)

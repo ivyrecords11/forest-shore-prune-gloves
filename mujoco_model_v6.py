@@ -1,9 +1,10 @@
 #@title Imports and global settings
-DEBUG           = False
+DEBUG           = True
 DEBUG_XML       = False
 DEBUG_INIT      = DEBUG and True
 DEBUG_RESET     = DEBUG and True
 DEBUG_SENSOR    = DEBUG and False
+DEBUG_DELAY     = DEBUG and False
 DEBUG_STEP      = DEBUG and False
 
 
@@ -29,6 +30,9 @@ Major Changes
 3. ball density increased
 4. WTA.
 5. Observer
+"""
+"""
+v5 - Changes
 """
 
 
@@ -182,7 +186,6 @@ class Environment(Env):
         Reset ball mass, position, plate angles, and set xml
         """
         # print("Resetting environment...")
-        self.close_viewer()
         # initialize all state variables
         self.simulation_duration_timestep : float = self.cfg.simulation_duration_s/self.dt
         self.success_timestep: int = self.cfg.success_duration_s/self.dt
@@ -352,6 +355,8 @@ class Environment(Env):
         # ----- 관측: (현재 센서스파이크) → DelayLine → (지연 적용 관측) -----
         s_now = self.sensor_inputs(flatten=True).numpy().astype(np.float32)   # (100,)
         self._delayline.push(s_now)
+        if DEBUG_DELAY and self._delayline.buf.size != 0:
+            print(f"[ENV] DELAY_LINE: {self._delayline.buf}")
         obs_delayed = self._delayline.read_delayed(self._delay_ks).astype(np.float32)  # (100,)
         observation = obs_delayed.reshape(self.cfg.n_sensor_1d, self.cfg.n_sensor_1d) #(10,10)
         # GOES INTO SCNN.
@@ -361,8 +366,9 @@ class Environment(Env):
         1. Distance from center
         2. center staying time
         3. Penalize - sudden z velocity from board
+        4. v direction - #TODO
         """
-        dist_from_target = math.sqrt(self.ball_x**2 + self.ball_y**2)*100 #cm
+        dist_from_target = (self.ball_x**2 + self.ball_y**2)*10000 #cm
         ball_vel = self.data.body("ball").cvel
         reward = -dist_from_target  # cm
         reward -= abs(ball_vel[2]) * 100 if abs(ball_vel[2]) > 0.05 else 0

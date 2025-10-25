@@ -9,7 +9,6 @@ DEBUG =
 """
 Conv
 Fc
-Fc
 """
 
 # TODO: Parameter 불러오기
@@ -75,6 +74,13 @@ FC (2048 -> 32)
 FC (32 -> 4)
 """
 
+def initialize_weights():
+    """
+    
+    """
+    #TODO
+    weights: np.array
+    return weights
 
 def load_weights(filepath: str):
     #TODO

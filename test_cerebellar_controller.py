@@ -7,7 +7,7 @@ import os
 
 import torch
 from config import SimulationConfig
-from mujoco_model_v5 import Environment  # 위 파일 이름에 맞춰 변경
+from mujoco_model_v3 import Environment  # 위 파일 이름에 맞춰 변경
 from utils_logger import SpikeHeatmap, SpikePlotter
 
 def pd_controller(e, e_prev, dt, Kp, Kd, u_clip=1.0):
