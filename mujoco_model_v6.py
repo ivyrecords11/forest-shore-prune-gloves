@@ -30,6 +30,8 @@ Major Changes
 3. ball density increased
 4. WTA.
 5. Observer
+>>>NEW: 6. Velocity rewards
+>>>NEW: function to choose motor accumulation or direct control
 """
 """
 v5 - Changes
@@ -316,7 +318,7 @@ class Environment(Env):
     def step(self, action: np.ndarray):
         """
         INPUTS
-            action: np.ndarray of shape (4,), values in [0,1]
+            action: np.ndarray of shape (4,), values in [0,1] 또는 연속적
                 [XP, XN, YP, YN] - 각 모터에 대한 제어 신호
         
         OUTPUTS
@@ -335,11 +337,16 @@ class Environment(Env):
         
         #assume action = 0 or 1
         # 
-        motor_acc = self._smooth_spikes(action)
-        action_gain = self._motor_map_to_action(motor_acc)
-        if DEBUG_STEP: print(f"[ENV] MOTOR_ACC: {motor_acc}, ACTION_GAIN: {action_gain}")
-        self.data.ctrl[0] = float(action_gain[0])  # px
-        self.data.ctrl[1] = float(action_gain[1])  # py
+        if self.cfg.motor_mode=='spikes':
+            motor_acc = self._smooth_spikes(action)
+            action_gain = self._motor_map_to_action(motor_acc)
+            if DEBUG_STEP: print(f"[ENV] MOTOR_ACC: {motor_acc}, ACTION_GAIN: {action_gain}")
+            self.data.ctrl[0] = float(action_gain[0])  # px
+            self.data.ctrl[1] = float(action_gain[1])  # py
+        elif self.cfg.motor_mode=='motor_neuron':
+            action_gain = self._motor_map_to_action(action)
+            self.data.ctrl[0], self.data.ctrl[1]= action_gain[0], action_gain[1]
+            if DEBUG_STEP: print("[ENV] ACTION / ACTION_GAIN:", action, action_gain)
         mj.mj_step(self.model, self.data) # xml에서 정의한 dt만큼 단일 스텝 진행
         if self.render: self.v.sync()
         
@@ -368,6 +375,10 @@ class Environment(Env):
         3. Penalize - sudden z velocity from board
         4. v direction - #TODO
         """
+        dist_from_target = (self.ball_x**2 + self.ball_y**2)*10000 #cm
+        ball_vel = self.data.body("ball").cvel
+        
+        # Velocity Rewards
         dist_from_target = (self.ball_x**2 + self.ball_y**2)*10000 #cm
         ball_vel = self.data.body("ball").cvel
         reward = -dist_from_target  # cm

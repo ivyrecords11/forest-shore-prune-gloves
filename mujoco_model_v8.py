@@ -30,9 +30,11 @@ Major Changes
 3. ball density increased
 4. WTA.
 5. Observer
-"""
-"""
-v5 - Changes
+6. Model now has z-axis
+7. input monitor is the circuit output
+8. motor hinge movement velocity decreased again(1.0->2.0)
+9. damping is 1 again
+>>>NEW: function to choose motor accumulation or direct control
 """
 
 
@@ -149,8 +151,8 @@ class Environment(Env):
         </default>
         <worldbody>
             <body name="plate_base" pos="0 0 0">
-            <joint name="hinge_x" type="hinge" axis="1 0 0" damping="1.0" range="{-self.cfg.motor_max_hinge_deg} {self.cfg.motor_max_hinge_deg}"/>
-            <joint name="hinge_y" type="hinge" axis="0 1 0" damping="1.0" range="{-self.cfg.motor_max_hinge_deg} {self.cfg.motor_max_hinge_deg}"/>
+            <joint name="hinge_x" type="hinge" axis="1 0 0" damping="2.0" range="{-self.cfg.motor_max_hinge_deg} {self.cfg.motor_max_hinge_deg}"/>
+            <joint name="hinge_y" type="hinge" axis="0 1 0" damping="2.0" range="{-self.cfg.motor_max_hinge_deg} {self.cfg.motor_max_hinge_deg}"/>
             <geom name="plate_geom" class="plate" size="{self.plate_size/2} {self.plate_size/2} 0.005" mass="1.0"/>
             </body>
             <body name="ball" pos="{self.ball_x} {self.ball_y} {self.ball_radius+0.005:.4f}">
@@ -164,6 +166,62 @@ class Environment(Env):
             <position name="py" joint="hinge_y" kp="200" kv="10" ctrlrange="{-self.motor_max_radians} {self.motor_max_radians}"/>
         </actuator>
 
+        </mujoco>
+        """.strip()
+        xml = f"""<mujoco model="tilt_plate">
+        <compiler angle="degree" inertiafromgeom="true"/>
+        <option timestep="{self.dt:.7f}" gravity="0 0 -9.81" integrator="implicit"/>
+
+        <default>
+            <geom condim="6" margin="0.0001" solimp="0.9 0.99 0.001" solref="0.005 1.0"/>
+            <default class="plate">
+            <geom type="box" friction="0.5 0.006 0.0010" rgba="0.8 0.8 0.85 1"/>
+            </default>
+            <default class="ball">
+            <geom type="sphere" friction="0.5 0.006 0.0010" rgba="0.9 0.3 0.3 1"/>
+            </default>
+            <joint armature="0.002" damping="0.1" limited="true"/>
+            <motor gear="1.0" ctrllimited="true" ctrlrange="-1.0 1.0"/>
+        </default>
+
+        <worldbody>
+            <!-- 판 루트: Z 슬라이드 -> X 힌지 -> Y 힌지 -->
+            <body name="plate_root" pos="0 0 0">
+            <!-- 가운데(중심) 높이: 위/아래 직선 이동 -->
+            <joint name="lift_z" type="slide" axis="0 0 1"
+                    range="-0.05 0.05" damping="1.0"/>
+
+            <!-- 판 기울기: 두 각도 -->
+            <joint name="hinge_x" type="hinge" axis="1 0 0"
+                    damping="1.0"
+                    range="-{self.cfg.motor_max_hinge_deg} {self.cfg.motor_max_hinge_deg}"/>
+            <joint name="hinge_y" type="hinge" axis="0 1 0"
+                    damping="1.0"
+                    range="-{self.cfg.motor_max_hinge_deg} {self.cfg.motor_max_hinge_deg}"/>
+
+            <geom name="plate_geom" class="plate"
+                    size="{self.plate_size/2} {self.plate_size/2} 0.005" mass="1.0"/>
+            </body>
+
+            <!-- 공: 초기 z는 (lift_z의 qpos) + 판 반두께(0.005) + 반지름 + 여유 -->
+            <body name="ball" pos="{self.ball_x} {self.ball_y} {self.ball_radius+0.005:.4f}">
+            <freejoint name="ball_free"/>
+            <geom name="ball_geom" class="ball"
+                    size="{self.ball_radius}" mass="{self.ball_mass}"/>
+            </body>
+        </worldbody>
+
+        <actuator>
+            <!-- 기존 각도 서보(목표 각도[rad]) -->
+            <position name="px" joint="hinge_x" kp="200" kv="10"
+                    ctrlrange="-{self.motor_max_radians} {self.motor_max_radians}"/>
+            <position name="py" joint="hinge_y" kp="200" kv="10"
+                    ctrlrange="-{self.motor_max_radians} {self.motor_max_radians}"/>
+
+            <!-- 새 가운데(중심 높이) 서보(목표 높이[m]) -->
+            <position name="pz" joint="lift_z" kp="500" kv="20"
+                    ctrlrange="-0.04 0.04"/>
+        </actuator>
         </mujoco>
         """.strip()
         if DEBUG_XML: 
@@ -268,7 +326,19 @@ class Environment(Env):
         else:
             # 기타 구조는 사용자가 정의
             raise ValueError(f"Unsupported n_motor={self.n_motor}")
-
+        
+    def _edge_to_angles_height(self, action_edge) -> np.ndarray:
+        """
+        4개 가장자리 높이 -> (theta_x, theta_y, h0)
+        z*: float (또는 텐서), Lx/Ly: 판 길이(m)
+        """
+        Lx, Ly = self.cfg.plate_size, self.cfg.plate_size
+        #if DEBUG: print(action_edge)
+        zL, zR, zF, zB = (action_edge)*self.motor_gain*(-1)
+        theta_x = (zF - zB) / Ly
+        theta_y = (zL - zR) / Lx
+        h0 = (zL + zR + zB + zF) / 4.0
+        return theta_x, theta_y, h0
     
     def sensor_inputs(self, flatten=True):
         """
@@ -316,7 +386,7 @@ class Environment(Env):
     def step(self, action: np.ndarray):
         """
         INPUTS
-            action: np.ndarray of shape (4,), values in [0,1]
+            action: np.ndarray of shape (4,), values in [0,1] 또는 연속적
                 [XP, XN, YP, YN] - 각 모터에 대한 제어 신호
         
         OUTPUTS
@@ -335,11 +405,16 @@ class Environment(Env):
         
         #assume action = 0 or 1
         # 
-        motor_acc = self._smooth_spikes(action)
-        action_gain = self._motor_map_to_action(motor_acc)
-        if DEBUG_STEP: print(f"[ENV] MOTOR_ACC: {motor_acc}, ACTION_GAIN: {action_gain}")
-        self.data.ctrl[0] = float(action_gain[0])  # px
-        self.data.ctrl[1] = float(action_gain[1])  # py
+        if self.cfg.motor_mode=='spikes':
+            motor_acc = self._smooth_spikes(action)
+            action_gain = self._edge_to_angles_height(motor_acc)
+            if DEBUG_STEP: print(f"[ENV] MOTOR_ACC: {motor_acc}, ACTION_GAIN: {action_gain}")
+            self.data.ctrl[0] = float(action_gain[0])  # px
+            self.data.ctrl[1] = float(action_gain[1])  # py
+        elif self.cfg.motor_mode=='motor_neuron':
+            action_gain = self._edge_to_angles_height(action)
+            self.data.ctrl = action_gain
+            if DEBUG_STEP: print("[ENV] ACTION / ACTION_GAIN:", action, action_gain)
         mj.mj_step(self.model, self.data) # xml에서 정의한 dt만큼 단일 스텝 진행
         if self.render: self.v.sync()
         
@@ -368,14 +443,18 @@ class Environment(Env):
         3. Penalize - sudden z velocity from board
         4. v direction - #TODO
         """
-        dist_from_target = (self.ball_x**2 + self.ball_y**2) #m
+        dist_from_target = (self.ball_x**2 + self.ball_y**2)*10000 #cm
         ball_vel = self.data.body("ball").cvel
-        reward = -dist_from_target  # m
+        
+        # Velocity Rewards
+        dist_from_target = (self.ball_x**2 + self.ball_y**2)*10000 #cm
+        ball_vel = self.data.body("ball").cvel
+        reward = -dist_from_target  # cm
         reward -= abs(ball_vel[2]) * 100 if abs(ball_vel[2]) > 0.05 else 0
         if DEBUG_STEP: print(f"[ENV] BALL Z VELOCITY: {ball_vel[2]}, penalty = {abs(ball_vel[2]) * 100 if abs(ball_vel[2]) > 0.1 else 0}")
 
         terminated = False        # terminated if stayed in center for success_timestep
-        if dist_from_target < 0.0001:
+        if dist_from_target < 1:
             self.success_count += 1
             reward *= -self.success_reward  # 보너스 (reward 범위: -1~0)
 

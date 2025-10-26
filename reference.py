@@ -4,7 +4,8 @@ from utils_logger import SpikePlotter, SpikeHeatmap
 
 import numpy as np
 
-DEBUG = 
+DEBUG = True
+# if true, print 
 
 """
 Conv
@@ -74,9 +75,11 @@ FC (2048 -> 32)
 FC (32 -> 4)
 """
 
-def initialize_weights():
+def initialize_weights(weight):
     """
-    
+    inputs: numpy array, 
+    normalize
+    outputs:
     """
     #TODO
     weights: np.array

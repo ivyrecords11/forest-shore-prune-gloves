@@ -7,7 +7,7 @@ import os
 
 import torch
 from config import SimulationConfig
-from mujoco_model_v3 import Environment  # 위 파일 이름에 맞춰 변경
+from mujoco_model_v8 import Environment  # 위 파일 이름에 맞춰 변경
 from utils_logger import SpikeHeatmap, SpikePlotter
 
 def pd_controller(e, e_prev, dt, Kp, Kd, u_clip=1.0):
@@ -39,7 +39,7 @@ def make_cfg():
         n_sensor_1d=10,
         n_mf=100,
         n_motor=4,
-        dt=1e-3,                    # 1 ms
+        dt=1e-5,                    # 1 ms
         ball_mass=None,             # reset 때 무작위
         ball_density=1000.0,
         simulation_duration_s=10.0,

@@ -56,7 +56,7 @@ class Config:
 
     # training
     episodes: int = 100
-    max_steps: int = 500
+    max_steps: int = 5000
     eps_greedy: float = 0.05
     seed: int = 7
 
@@ -186,22 +186,22 @@ class CerebellarNet(nn.Module):
 
         # Heads — pkj pooled to 2x2
         self.pkj2motor = nn.Linear(cfg.n_pkj * 2 * 2, action_dim, bias=False)
+        print(cfg.n_pkj * 2 * 2)
+        print(self.pkj2motor)
+        print(self.pkj2motor.weight)
+        # weight = 16 * 4
 
         # init
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.normal_(m.weight, 0.1, 0.01)
+                nn.init.kaiming_normal_(m.weight)
+                #nn.init.normal_(m.weight, 0.1, 2/cfg.n_mf)
             if isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, 1.0, 0.05)
+                nn.init.kaiming_normal_(m.weight)
+                #nn.init.normal_(m.weight, 1.0, ) #kaiming'''
         # Heads — pkj pooled to 2x2
-        self.pkj2motor = nn.Linear(cfg.n_pkj * 2 * 2, action_dim, bias=False)
 
         # init (권장: 평균 0으로)
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.normal_(m.weight, mean=0.0, std=0.05)
-            if isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, mean=0.0, std=0.05)
 
     def forward(self, mf: torch.Tensor) -> Dict[str, torch.Tensor]:
         # goc branch
@@ -216,9 +216,12 @@ class CerebellarNet(nn.Module):
         pkj_pre = self.grc2pkj(grc) - self.mli2pkj(mli)      # (B, n_pkj, 4, 4)
         pkj = self.pkj(pkj_pre)                               # (B, n_pkj, 4, 4)
         pkj_2x2 = F.avg_pool2d(pkj, 2, 2)                     # (B, n_pkj, 2, 2)
+        #print(pkj_2x2.shape)
 
         # !!! 평탄화는 배치 보존 !!!
-        flat = pkj_2x2.flatten(start_dim=1).contiguous()      # (B, n_pkj*2*2)
+        flat = pkj_2x2.flatten(start_dim=0).contiguous()      # (B, n_pkj*2*2)
+        flat = flat.unsqueeze(dim=0)
+        #print(flat.shape)
 
         # motor head
         motor_y = self.motor(self.pkj2motor(flat))            # (B, action_dim)
@@ -298,7 +301,7 @@ class RewardModulatedSTDP:
         dw = self.reward_scale * r_hat * (self.A_plus * ltp - self.A_minus * ltd)
 
         # in-place update + clamp
-        self.layer.weight.add_(dw.to(self.layer.weight.dtype, self.layer.weight.device))
+        self.layer.weight.add_(dw.to(self.layer.weight.device,self.layer.weight.dtype))
         self.layer.weight.clamp_(self.wmin, self.wmax)
 
 class RewardModulatedSTDP_new:
@@ -453,12 +456,17 @@ class Agent:
             outs = self.net(mf)
 
             # 2) pre/post 추출
-            pre = (outs["pkj_2x2"].detach() > 0).float().flatten(1)     # (B, N_pre)
+            pre = (outs["pkj_2x2"].detach() > 0).float().flatten(0).unsqueeze(0)     # (B, N_pre)
             motor_mem = self.net.motor.v                                 # (B, n_act)
             post = (motor_mem > 0.0).float()                             # (B, n_post)
 
+            #print(motor_mem[0])
+
             # 3) 행동 선택 (막전위 기반 ε-greedy)
-            act = int(self.select_action(motor_mem, self.cfg.eps_greedy).item())
+            act = [(1 if m>1 else 0) for m in motor_mem[0]]
+            #act = int(self.select_action(motor_mem, self.cfg.eps_greedy).item())
+            print(act)
+            #temp = input("proceed:")
 
             # 4) 환경 진행 → reward 수신
             next_obs, reward, terminated, truncated, info = env.step(act)

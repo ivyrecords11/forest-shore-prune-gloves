@@ -14,6 +14,7 @@ from torch.distributions import Bernoulli, Normal
 from spikingjelly.activation_based import functional, neuron, surrogate, monitor
 from datetime import datetime
 
+
 class WeightClipperExhibition(object):
     def __call__(self, module, param, clip_min, clip_max):
     	if hasattr(module, param):
