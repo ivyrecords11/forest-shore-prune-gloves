@@ -1,5 +1,5 @@
 from config import SimulationConfig
-from mujoco_model_v6 import Environment
+from mujoco_model_v10 import Environment
 from utils_logger import SpikePlotter, SpikeHeatmap, PotentialPlotter, PotentialPlotter_vertical
 from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv
 
@@ -13,6 +13,8 @@ import torch.optim as optim
 from torch.distributions import Bernoulli, Normal
 from spikingjelly.activation_based import functional, neuron, surrogate, monitor
 from datetime import datetime
+
+from snn_model import SpikingNet
 
 """
 entropy to item.
@@ -89,8 +91,8 @@ def ppo_update(model, optimizer, ppo_epochs, mini_batch_size, states, actions, l
 
     for p_epoch in range(ppo_epochs):
         for state, action, old_log_probs, return_, advantage in ppo_iter(mini_batch_size, states, actions, log_probs, returns, advantages):
-            dist, value = model(state)
             functional.reset_net(model)
+            dist, value = model(state)
 
             entropy = dist.entropy().mean()
             new_log_probs = dist.log_prob(action.float())
@@ -104,8 +106,10 @@ def ppo_update(model, optimizer, ppo_epochs, mini_batch_size, states, actions, l
 
             loss = 0.5 * critic_loss + actor_loss - 0.001 * entropy
             optimizer.zero_grad()
+            torch.autograd.set_detect_anomaly(True)
             loss.backward()
             optimizer.step()
+            
         
         print(f"[TRAIN] ppo_epoch: {p_epoch}, loss: {loss.item():.4f}, actor_loss: {actor_loss.item():.4f}, critic_loss: {critic_loss.item():.4f}, entropy: {entropy.item():.4f}")
 
@@ -150,24 +154,28 @@ class NonSpikingLIFNode(neuron.LIFNode):
         return self.v
 
 class CerebellarCNNAC2(nn.Module):
-    def __init__(self, n_grc=8, n_pkg=32, n_motor=4, tau=cfg.tau, T=32, std = 0.0, log = False):
+    def __init__(self, n_grc=8, n_pkj=32, n_motor=4, tau=cfg.tau, T=cfg.T, std = 0.0, log = False):
         super(CerebellarCNNAC2, self).__init__()
 
-        self.n_grc = n_grc*36
+        self.n_grc = n_grc*16
 
         self.critic = nn.Sequential(
-            nn.Conv2d(in_channels = 1, out_channels = n_grc, kernel_size= 5, stride = 1, padding = 'valid', padding_mode = 'zeros', bias = False),
+            nn.Conv2d(in_channels = 1, out_channels = n_grc, kernel_size= 4, stride = 2, padding = 'valid', padding_mode = 'zeros', bias = False),
             neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan(), detach_reset=True),
             nn.Flatten(),
-            nn.Linear(self.n_grc, 1, bias = False),
-            NonSpikingLIFNode(tau = tau)
+            nn.Linear(self.n_grc, n_pkj, bias = False),
+            neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan(), detach_reset=True),
+            nn.Linear(n_pkj, 1, bias = False),
+            NonSpikingLIFNode(tau = cfg.motor_decay)
         )
         self.actor = nn.Sequential(
-            nn.Conv2d(in_channels = 1, out_channels = n_grc, kernel_size= 5, stride = 1, padding = 'valid', padding_mode = 'zeros', bias = False),
+            nn.Conv2d(in_channels = 1, out_channels = n_grc, kernel_size= 4, stride = 2, padding = 'valid', padding_mode = 'zeros', bias = False),
             neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan(), detach_reset=True),
             nn.Flatten(),
-            nn.Linear(self.n_grc, n_motor, bias = False),
-            neuron.LIFNode(tau = tau)
+            nn.Linear(self.n_grc, n_pkj, bias = False),
+            neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan(), detach_reset=True),
+            nn.Linear(n_pkj, n_motor, bias = False),
+            NonSpikingLIFNode(tau = cfg.motor_decay)
         )
         self.log_std = nn.Parameter(torch.ones(1, 4) * std)
         self.log = log
@@ -176,15 +184,18 @@ class CerebellarCNNAC2(nn.Module):
             if isinstance(m, nn.Linear):
                 if cfg.weight_init == "xavier":
                     torch.nn.init.xavier_normal_(m.weight.data, gain=1.0)
+                elif cfg.weight_init =="kaiming":
+                    torch.nn.init.kaiming_normal_(m.weight.data)
                 elif cfg.weight_init == "normal-0":
                     torch.nn.init.normal_(m.weight.data, mean=0.0, std=1.0)
             
             if isinstance(m, nn.Conv2d):
                 if cfg.weight_init == "xavier":
                     torch.nn.init.xavier_normal_(m.weight.data, gain=1.0)
+                elif cfg.weight_init =="kaiming":
+                    torch.nn.init.kaiming_normal_(m.weight.data)
                 elif cfg.weight_init == "normal-0":
                     torch.nn.init.normal_(m.weight.data, mean=0.0, std=1.0)
-
             # monitoring setting
             if isinstance(m, neuron.LIFNode):
                 m.store_v_seq = False
@@ -227,11 +238,12 @@ class CerebellarCNNAC2(nn.Module):
         
     def forward(self, x):
         # ... (SNN 순전파 코드)
+        functional.reset_net(self)
         for t in range(self.T):
             self.critic(x)
             self.actor(x)
-        value = self.critic[-1].v
-        mu = self.actor[-1].v
+        value = self.critic[-1].v.clone()
+        mu = self.actor[-1].v.clone()
         std   = self.log_std.exp().expand_as(mu)
         dist  = Normal(mu, std)
         #if DEBUG: print(f"[TRAIN] actor:{actor}, critic:{critic}, actor potential:{self.actor[-1].v}, critic potential:{self.critic[-1].v},")
@@ -419,7 +431,8 @@ if __name__ == "__main__":
             
             observation = torch.from_numpy(observation).float().to(device)
             observation = observation.unsqueeze(0).unsqueeze(0)  # Add batch and channel dimensions
-
+            
+            torch.autograd.set_detect_anomaly(True)
             distribution, value = model(observation)
             action = distribution.sample()
             action_tensor = action.detach()

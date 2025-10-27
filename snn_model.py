@@ -8,7 +8,7 @@ from torch.nn.utils import clip_grad_norm_
 from torch.distributions import Bernoulli, Normal
 from spikingjelly.activation_based import functional, neuron, surrogate, monitor
 from config import SimulationConfig
-
+DEBUG_MONITOR = False
 cfg = SimulationConfig()
 
 class NonSpikingLIFNode(neuron.LIFNode):
@@ -40,25 +40,25 @@ class NonSpikingLIFNode(neuron.LIFNode):
                     self.v = self.neuronal_charge_no_decay_input(x, self.v, self.v_reset, self.tau)
         return self.v
 
-class CerebellarCNNAC2(nn.Module):
-    def __init__(self, n_grc=8, n_pkg=32, n_motor=4, tau=cfg.tau, T=cfg.T, std = 0.0, log = False):
+class CerebellarCNNAC2_old(nn.Module):
+    def __init__(self, n_grc=cfg.n_grc, n_pkg=cfg.n_pkj, n_motor=4, tau=cfg.tau, T=cfg.T, std = 0.0, log = False):
         super(CerebellarCNNAC2, self).__init__()
 
-        self.n_grc = n_grc*36
+        self.n_grc_flat = n_grc*16
         motor_decay = cfg.motor_decay
 
         self.critic = nn.Sequential(
-            nn.Conv2d(in_channels = 1, out_channels = n_grc, kernel_size= 5, stride = 1, padding = 'valid', padding_mode = 'zeros', bias = False),
+            nn.Conv2d(in_channels = 1, out_channels = n_grc, kernel_size= 4, stride = 2, padding = 'valid', padding_mode = 'zeros', bias = False),
             neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan(), detach_reset=True),
             nn.Flatten(),
-            nn.Linear(self.n_grc, 1, bias = False),
+            nn.Linear(self.n_grc_flat, 1, bias = False),
             NonSpikingLIFNode(tau = tau)
         )
         self.actor = nn.Sequential(
-            nn.Conv2d(in_channels = 1, out_channels = n_grc, kernel_size= 5, stride = 1, padding = 'valid', padding_mode = 'zeros', bias = False),
+            nn.Conv2d(in_channels = 1, out_channels = n_grc, kernel_size= 4, stride = 2, padding = 'valid', padding_mode = 'zeros', bias = False),
             neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan(), detach_reset=True),
             nn.Flatten(),
-            nn.Linear(self.n_grc, n_motor, bias = False),
+            nn.Linear(self.n_grc_flat, n_motor, bias = False),
             NonSpikingLIFNode(tau = tau)
         )
         self.log_std = nn.Parameter(torch.ones(1, 4) * std)
@@ -68,12 +68,16 @@ class CerebellarCNNAC2(nn.Module):
             if isinstance(m, nn.Linear):
                 if cfg.weight_init == "xavier":
                     torch.nn.init.xavier_normal_(m.weight.data, gain=1.0)
+                elif cfg.weight_init =="kaiming":
+                    torch.nn.init.kaiming_normal_(m.weight.data)
                 elif cfg.weight_init == "normal-0":
                     torch.nn.init.normal_(m.weight.data, mean=0.0, std=1.0)
             
             if isinstance(m, nn.Conv2d):
                 if cfg.weight_init == "xavier":
                     torch.nn.init.xavier_normal_(m.weight.data, gain=1.0)
+                elif cfg.weight_init =="kaiming":
+                    torch.nn.init.kaiming_normal_(m.weight.data)
                 elif cfg.weight_init == "normal-0":
                     torch.nn.init.normal_(m.weight.data, mean=0.0, std=1.0)
 
@@ -129,26 +133,31 @@ class CerebellarCNNAC2(nn.Module):
         #if DEBUG: print(f"[TRAIN] actor:{actor}, critic:{critic}, actor potential:{self.actor[-1].v}, critic potential:{self.critic[-1].v},")
         return dist, value
 
-class CerebellarCNNAC2(nn.Module):
-    def __init__(self, n_grc=8, n_pkg=32, n_motor=4, tau=cfg.tau, T=cfg.T, std = 0.0, log = False):
-        super(CerebellarCNNAC2, self).__init__()
+class CerebellarCNNAC2_old_2(nn.Module):
+    def __init__(self, n_grc=8, n_pkj=32, n_motor=4, tau=cfg.tau, T=cfg.T, std = 0.0, log = False):
+        super(CerebellarCNNAC2_old_2, self).__init__()
 
-        self.n_grc = n_grc*36
-        motor_decay = cfg.motor_decay
+        self.n_grc = n_grc*16
+        self.n_pkj = n_pkj*9
 
         self.critic = nn.Sequential(
-            nn.Conv2d(in_channels = 1, out_channels = n_grc, kernel_size= 5, stride = 1, padding = 'valid', padding_mode = 'zeros', bias = False),
+            nn.Conv2d(in_channels = 1, out_channels = n_grc, kernel_size= 2, stride = 1, padding = 'valid', padding_mode = 'zeros', bias = False),
+            neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan(), detach_reset=True),
+            nn.Conv2d(in_channels = n_grc, out_channels = n_pkj, kernel_size= 2, stride = 1, padding = 'valid', padding_mode = 'zeros', bias = False),
             neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan(), detach_reset=True),
             nn.Flatten(),
-            nn.Linear(self.n_grc, 1, bias = False),
-            NonSpikingLIFNode(tau = tau)
+            nn.Linear(n_pkj, 1, bias = False),
+            NonSpikingLIFNode(tau = cfg.motor_decay)
         )
+        
         self.actor = nn.Sequential(
-            nn.Conv2d(in_channels = 1, out_channels = n_grc, kernel_size= 5, stride = 1, padding = 'valid', padding_mode = 'zeros', bias = False),
+            nn.Conv2d(in_channels = 1, out_channels = n_grc, kernel_size= 4, stride = 2, padding = 'valid', padding_mode = 'zeros', bias = False),
+            neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan(), detach_reset=True),
+            nn.Conv2d(in_channels = n_grc, out_channels = n_pkj, kernel_size= 2, stride = 1, padding = 'valid', padding_mode = 'zeros', bias = False),
             neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan(), detach_reset=True),
             nn.Flatten(),
-            nn.Linear(self.n_grc, n_motor, bias = False),
-            NonSpikingLIFNode(tau = tau)
+            nn.Linear(self.n_pkj, n_motor, bias = False),
+            NonSpikingLIFNode(tau = cfg.motor_decay)
         )
         self.log_std = nn.Parameter(torch.ones(1, 4) * std)
         self.log = log
@@ -157,15 +166,18 @@ class CerebellarCNNAC2(nn.Module):
             if isinstance(m, nn.Linear):
                 if cfg.weight_init == "xavier":
                     torch.nn.init.xavier_normal_(m.weight.data, gain=1.0)
+                elif cfg.weight_init =="kaiming":
+                    torch.nn.init.kaiming_normal_(m.weight.data)
                 elif cfg.weight_init == "normal-0":
                     torch.nn.init.normal_(m.weight.data, mean=0.0, std=1.0)
             
             if isinstance(m, nn.Conv2d):
                 if cfg.weight_init == "xavier":
                     torch.nn.init.xavier_normal_(m.weight.data, gain=1.0)
+                elif cfg.weight_init =="kaiming":
+                    torch.nn.init.kaiming_normal_(m.weight.data)
                 elif cfg.weight_init == "normal-0":
                     torch.nn.init.normal_(m.weight.data, mean=0.0, std=1.0)
-
             # monitoring setting
             if isinstance(m, neuron.LIFNode):
                 m.store_v_seq = False
@@ -208,12 +220,198 @@ class CerebellarCNNAC2(nn.Module):
         
     def forward(self, x):
         # ... (SNN 순전파 코드)
+        functional.reset_net(self)
         for t in range(self.T):
             self.critic(x)
             self.actor(x)
-        value = self.critic[-1].v
-        mu = self.actor[-1].v
+        value = self.critic[-1].v.clone()
+        mu = self.actor[-1].v.clone()
         std   = self.log_std.exp().expand_as(mu)
         dist  = Normal(mu, std)
         #if DEBUG: print(f"[TRAIN] actor:{actor}, critic:{critic}, actor potential:{self.actor[-1].v}, critic potential:{self.critic[-1].v},")
         return dist, value
+
+class CerebellarCNNAC2(nn.Module):
+    def __init__(self, n_grc=32, n_pkj=4, n_motor=4, tau=cfg.tau, T=cfg.T, std = 0.0, log = False):
+        super(CerebellarCNNAC2, self).__init__()
+
+        self.n_grc = n_grc*16
+        self.n_pkj = n_pkj*9
+        self.conv0_actor = nn.Conv2d(1, 1, kernel_size = 1, stride = 1, padding='valid', bias = False)
+        self.lif0_actor = neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.conv1_actor = nn.Conv2d(2, n_grc, kernel_size=4, stride=2, padding='valid', bias=False)
+        self.lif1_actor = neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan(), detach_reset=True)
+
+        self.conv2_actor = nn.Conv2d(self.n_grc, n_pkj, kernel_size=2, stride=1, padding='valid', bias=False)
+        self.lif2_actor = neuron.LIFNode(tau=cfg.t_pkj, surrogate_function=surrogate.ATan(), detach_reset=True)
+
+        self.flatten_actor = nn.Flatten()
+        self.pkj_actor = nn.Linear(self.n_grc, self.n_pkj, bias=False)
+        self.linear_actor = nn.Linear(self.n_pkj, n_motor, bias=False)
+        self.lif_out_actor = NonSpikingLIFNode(tau=cfg.motor_decay)
+
+        self.log_std = nn.Parameter(torch.ones(1, 4) * std)
+        self.log = log
+        self.T = T
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                if cfg.weight_init == "xavier":
+                    torch.nn.init.xavier_normal_(m.weight.data, gain=1.0)
+                elif cfg.weight_init =="kaiming":
+                    torch.nn.init.kaiming_normal_(m.weight.data)
+                elif cfg.weight_init == "normal-0":
+                    torch.nn.init.normal_(m.weight.data, mean=0.0, std=1.0)
+            
+            if isinstance(m, nn.Conv2d):
+                if cfg.weight_init == "xavier":
+                    torch.nn.init.xavier_normal_(m.weight.data, gain=1.0)
+                elif cfg.weight_init =="kaiming":
+                    torch.nn.init.kaiming_normal_(m.weight.data)
+                elif cfg.weight_init == "normal-0":
+                    torch.nn.init.normal_(m.weight.data, mean=0.0, std=1.0)
+            # monitoring setting
+            if isinstance(m, neuron.LIFNode):
+                m.store_v_seq = False
+    def forward(self, x):
+        dx=x.clone()
+        x=self.lif0_actor(self.conv0_actor(x))
+        #print(x.shape, dx.shape)
+        if x.shape[0] < dx.shape[0]:
+            x=x.repeat(dx.shape[0], 1, 1, 1)
+        elif x.shape[0] > dx.shape[0]:
+            x=x[0].unsqueeze(0)
+        #print(x.shape)
+        x = torch.cat((x, dx), dim = -3)
+        x = self.conv1_actor(x)
+        x = self.lif1_actor(x)
+        x = self.flatten_actor(x)
+
+        #x = self.conv2_actor(x)
+        x = self.pkj_actor(x)
+        x = self.lif2_actor(x)
+
+        x = self.linear_actor(x)
+        x = self.lif_out_actor(x)
+        return x
+    def set_logging(self, flag: bool):
+        self.log = flag
+        if self.log == True:
+            self.input_monitor = monitor.InputMonitor(net = self, instance = neuron.LIFNode)
+            self.spike_monitor = monitor.OutputMonitor(net=self, instance=neuron.LIFNode)
+            self.potential_monitor = monitor.AttributeMonitor(net=self, pre_forward=False, instance=neuron.LIFNode, attribute_name='v')
+        else:
+            self.input_monitor = None
+            self.spike_monitor = None
+            self.potential_monitor = None
+
+    def return_potential_monitor(self):
+        if self.log==True:
+            #if DEBUG: print(f"[TRAIN] spike monitor records: {self.spike_monitor.records}")n
+            step_potential = self.potential_monitor['1'][-1].detach().squeeze().cpu().numpy()
+            #step_potential = np.array(self.potential_monitor['1'].detach())
+            self.potential_monitor.clear_recorded_data()
+            if DEBUG_MONITOR: print(f"[TRAIN] step_potential = {step_potential.flatten()[:20]}...")
+            return step_potential
+        else: return False
+    def return_spike_monitor(self):
+        if self.log==True:
+            #if DEBUG: print(f"[TRAIN] spike monitor records: {self.spike_monitor.records}")
+            step_spike = self.spike_monitor['1'][-1].detach().squeeze().cpu().numpy()
+            if DEBUG_MONITOR: print(type(step_spike))
+            self.spike_monitor.clear_recorded_data()
+            if DEBUG_MONITOR: print(f"[TRAIN] step_spike = {step_spike.flatten()[:20]}...")
+            return step_spike
+        else: print("error")
+    def clear_monitor(self):
+        if self.log == True:
+            self.spike_monitor.clear_recorded_data()
+            self.potential_monitor.clear_recorded_data()
+            self.input_monitor.clear_recorded_data()
+
+class SpikingNet(nn.Module):
+    def __init__(self, n_grc=1024, n_pkj=60, n_motor=4, tau=cfg.tau, T=cfg.T, std = 0.0, log = False):
+        super(SpikingNet, self).__init__()
+        self.fc1 = nn.Linear(100, n_grc, bias=False)
+        self.grc = neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.fc0 = nn.Linear(100, 100, bias = False)
+        self.goc = neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.fc2 = nn.Linear(n_grc, n_pkj)
+        self.pkj = neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.fc3 = nn.Linear(n_pkj+4, n_motor)
+        self.motor = NonSpikingLIFNode(tau=cfg.motor_decay)
+        
+        #motor_decay = cfg.motor_decay
+        self.log_std = nn.Parameter(torch.ones(1, 4) * std)
+        self.log = log
+        self.T = T
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                if cfg.weight_init == "xavier":
+                    torch.nn.init.xavier_normal_(m.weight.data, gain=1.0)
+                elif cfg.weight_init =="kaiming":
+                    torch.nn.init.kaiming_normal_(m.weight.data)
+                elif cfg.weight_init == "normal-0":
+                    torch.nn.init.normal_(m.weight.data, mean=0.0, std=1.0)
+            
+            if isinstance(m, nn.Conv2d):
+                if cfg.weight_init == "xavier":
+                    torch.nn.init.xavier_normal_(m.weight.data, gain=1.0)
+                elif cfg.weight_init =="kaiming":
+                    torch.nn.init.kaiming_normal_(m.weight.data)
+                elif cfg.weight_init == "normal-0":
+                    torch.nn.init.normal_(m.weight.data, mean=0.0, std=1.0)
+
+            # monitoring setting
+            if isinstance(m, neuron.LIFNode):
+                m.store_v_seq = False
+    def forward(self, mf, cf):
+        """
+        mf: 센서 입력
+        cf: 전 단 모터뉴런 출력
+        motor: 모터뉴런 전위(출력)
+        """
+        mf=torch.reshape(mf, (-1,1,100))
+        cf=torch.reshape(torch.Tensor(cf), (-1,1,4))
+        grc = self.grc(self.fc1(mf))
+        pkj = self.pkj(self.fc2(grc))
+        print(mf.shape,grc.shape,pkj.shape, cf.shape)
+        motor = self.motor(self.fc3(torch.cat((pkj,cf), dim=2)))
+        #print(motor)
+        return motor
+        
+        
+        
+    def set_logging(self, flag: bool):
+        self.log = flag
+        if self.log == True:
+            self.input_monitor = monitor.InputMonitor(net=self, instance = neuron.LIFNode)
+            self.spike_monitor = monitor.OutputMonitor(net=self, instance=neuron.LIFNode, )
+            self.potential_monitor = monitor.AttributeMonitor(net=self, pre_forward=False, instance=neuron.LIFNode, attribute_name='v')
+        else:
+            self.input_monitor = None
+            self.spike_monitor = None
+            self.potential_monitor = None
+
+    def return_potential_monitor(self):
+        if self.log==True:
+            #if DEBUG: print(f"[TRAIN] spike monitor records: {self.spike_monitor.records}")n
+            step_potential = self.potential_monitor['1'][-1].detach().squeeze().cpu().numpy()
+            #step_potential = np.array(self.potential_monitor['1'].detach())
+            self.potential_monitor.clear_recorded_data()
+            if DEBUG_MONITOR: print(f"[TRAIN] step_potential = {step_potential.flatten()[:20]}...")
+            return step_potential
+        else: return False
+    def return_spike_monitor(self):
+        if self.log==True:
+            #if DEBUG: print(f"[TRAIN] spike monitor records: {self.spike_monitor.records}")
+            step_spike = self.spike_monitor['1'][-1].detach().squeeze().cpu().numpy()
+            if DEBUG_MONITOR: print(type(step_spike))
+            self.spike_monitor.clear_recorded_data()
+            if DEBUG_MONITOR: print(f"[TRAIN] step_spike = {step_spike.flatten()[:20]}...")
+            return step_spike
+        else: print("error")
+    def clear_monitor(self):
+        if self.log == True:
+            self.spike_monitor.clear_recorded_data()
+            self.potential_monitor.clear_recorded_data()
+            self.input_monitor.clear_recorded_data()

@@ -114,7 +114,7 @@ class wip_LIFNeuron():
 
         return v, spike
 
-def convolution(newrow, newcolumn)
+def convolution(newrow, newcolumn):
     
 def simulation(cfg: SimulationConfig):
     sim_dur_step = int(cfg.simulation_duration_s/cfg.dt)
@@ -131,11 +131,12 @@ def simulation(cfg: SimulationConfig):
     threshold_motor = np.ones(cfg.n_motor) * 1.0
 
     for simulation_step in range(sim_dur_step):
-        # Conv
-        for c in range(6):
-            for r in range(6):
-                for i in range(5):
-                    for j in range(5):
+        # Conv - stride 2
+        for c in range(4):
+            for r in range(4):
+                for i in range(4):
+                    for j in range(4):
+                        
         # TODO: grc -> pkj fc
         # TODO: pkj -> motor fc
         

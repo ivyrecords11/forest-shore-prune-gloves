@@ -11,8 +11,10 @@ from torch.nn.utils import clip_grad_norm_
 from torch.distributions import Bernoulli, Normal
 from spikingjelly.activation_based import functional, neuron, surrogate, monitor
 from config import SimulationConfig
-from mujoco_model_v8 import Environment
-from snn_model import CerebellarCNNAC2       # <- CerebellarCNNAC2 정의가 있는 모듈로 교체
+from mujoco_model_v10 import Environment
+from snn_model import CerebellarCNNAC2_old_2       # <- CerebellarCNNAC2_old_2 정의가 있는 모듈로 교체
+
+from utils_logger import SpikeHeatmap, SpikePlotter, PotentialPlotter
 cfg = SimulationConfig()
 
 # =========================
@@ -69,9 +71,11 @@ def q_values_from_model(model, obs_batch):
     for _ in range(model.T):
         action = model.actor(obs_batch)
         #print(obs_batch, action)
+    q = model.actor[-1].v
+    assert q[-1].shape == torch.Size([4]), f"q[0]: {q[0]}, q: {q}"
     #print("==========================================================")
     #print(action)
-    return action  # (B, n_actions)
+    return q[-1] # (B, n_actions)
 
 # =========================
 # 5) DQN 최적화 스텝
@@ -190,7 +194,7 @@ def train_dqn(env, model, *,
               tau: float = 0.01,
               hard_update_interval: int = 1000,
               DIR: str = "./runs",                 # <-- 추가
-              trial_num: str = "0001",             # <-- 추가
+              trial_num: int = 1,             # <-- 추가
               start_epoch: int = 0,                # <-- 추가
               DEBUG: bool = True):                 # <-- 추가
 
@@ -207,7 +211,7 @@ def train_dqn(env, model, *,
     max_steps_per_ep = int(cfg.simulation_duration_s / cfg.dt)
     start_learning = max(cfg.num_steps, 512)
     train_freq = 4
-    batch_size = 64
+    batch_size = cfg.num_steps
     buffer_size = max_steps_per_ep * 50
 
     if episodes is None:
@@ -237,13 +241,19 @@ def train_dqn(env, model, *,
     global_step = 0
     for ep in range(episodes):
         # ---- 10회마다 로깅 1회만 활성화 ----
-        log_this = ((ep + 1) % 10 == 0)
+        log_this = ((ep) % 10 == 0)
         model.set_logging(log_this)
+        if log_this:
+            logger_heatmap = SpikeHeatmap(plot_name=f"{DIR}/{trial_num}_train/plots/sensor_heatmap_epoch_{ep}", shape=(cfg.n_sensor_1d, cfg.n_sensor_1d))
+            logger_output_v = PotentialPlotter(plot_name=f"{DIR}/{trial_num}_train/plots/output_spike_epoch_{ep}")
+        else:
+            logger_heatmap = None
+            logger_output_v = None
 
         # ---- 에피소드 시작 ----
         functional.reset_net(model)
         t0 = time.time()
-        obs, _ = env.reset()
+        obs, info_init = env.reset()
         if obs.ndim == 2:
             obs = obs[None, ...]  # (1,H,W)
 
@@ -254,9 +264,14 @@ def train_dqn(env, model, *,
             global_step += 1
             steps += 1
             eps = max(eps_end, eps - eps_decay)
-
+            
             a = select_action_epsilon_greedy(model, obs, eps, n_actions, device)
-
+            
+            #log
+            if log_this:
+                logger_heatmap.save_spikes(obs)
+                logger_output_v.save_spikes(a)
+                
             next_obs, r, terminated, truncated, info = env.step(a)
             done = bool(terminated or truncated)
             last_info = info or last_info
@@ -281,15 +296,19 @@ def train_dqn(env, model, *,
                     hard_update(target, model)
 
         # ===== 여기부터: 요청한 저장/로그 코드로 교체 =====
-        duration = round(time.time() - t0, 3)
+        if log_this:
+            logger_output_v.plot()
+            logger_heatmap.plot()
+            logger_output_v.clear()
+            logger_heatmap.clear()
+            del logger_output_v, logger_heatmap
+        duration = steps
         total_reward = ep_reward
         entropy = float("nan")   # DQN에서는 의미 없음. 필요시 0.0로 대체 가능
 
         # ball_pos, ball_mass 안전 추출
-        bx = last_info.get("ball_pos_x", np.nan)
-        by = last_info.get("ball_pos_y", np.nan)
-        ball_pos = (bx, by)
-        ball_mass = last_info.get("ball_mass", np.nan)
+        ball_pos = info_init.get("ball_pos",np.nan)
+        ball_mass = info_init.get("ball_mass", np.nan)
 
         now_utc = datetime.now()
         month = now_utc.month
@@ -299,9 +318,8 @@ def train_dqn(env, model, *,
         second = now_utc.second
 
         epoch = start_epoch + ep + 1
-
         print(f"[TRAIN] [Epoch {epoch}] total_reward: {total_reward:.2f}, duration: {duration}, entropy: {entropy:.4f}, datetime:{month:02}/{day:02} {hour:02}:{minute:02}:{second:02}")
-
+        print(f"[TRAIN] Total Reward/Distance(L1) from Center:{total_reward/abs(ball_pos[0]+ball_pos[1])}")
         log_csv = f"{DIR}/{trial_num}_train/LOG.csv"
         new_file = not os.path.exists(log_csv)
         with open(log_csv, "a", newline="") as file_train_log:
@@ -322,22 +340,20 @@ def train_dqn(env, model, *,
             try: close_viewer()
             except Exception: pass
 
-        if DEBUG: print("[TRAIN] Training complete.")
+        #if DEBUG: print("[TRAIN] Training complete.")
 
         # 모델 가중치(pth)
-        pth_path = f"{DIR}/{trial_num}_train/model_params_{start_epoch+max_epochs}.pth"
+        pth_path = f"{DIR}/{trial_num}_train/model_params_{epoch}.pth"
         torch.save(model.state_dict(), pth_path)
 
         # (디버깅용) state_dict 프린트
-        if DEBUG:
-            print(model.state_dict())
 
         # CONFIG 저장
         with open(f"{DIR}/{trial_num}_train/CONFIG.txt", "w", encoding="utf-8") as file_config:
             file_config.write(str(cfg))
 
         # 모델 파라미터 CSV 저장(요청한 중첩 루프 형태 그대로)
-        with open(f"{DIR}/{trial_num}_train/model_params_{start_epoch+max_epochs}.csv", "a", newline="") as file_params:
+        with open(f"{DIR}/{trial_num}_train/model_params_{epoch}.csv", "a", newline="") as file_params:
             writer = csv.writer(file_params)
             writer.writerow(["Layer", "Parameter Name", "Values"])
             for name, param in model.state_dict().items():
@@ -367,7 +383,7 @@ def train_dqn(env, model, *,
         with open(f"{DIR}/MANIFEST.csv", "a") as file_manifest:
             file_manifest.write(f"{trial_num},{total_reward},{cfg}\n")
 
-        if DEBUG: print("[TRAIN] All data saved.")
+        #if DEBUG: print("[TRAIN] All data saved.")
         # ===== 교체 끝 =====
 
         # 에피소드 종료 정리
@@ -379,7 +395,81 @@ def train_dqn(env, model, *,
         functional.reset_net(model)
 
 if __name__ == '__main__':
-    
+    # -------------------------------
+    # 0. Create main directory
+    # -------------------------------
+    DIR = "./TRAIN_PPO"
+    os.makedirs(DIR, exist_ok=True)
+
+    # -------------------------------
+    # 1. Prepare MANIFEST and trial
+    # -------------------------------
+    start_epoch = 0
+    trial_num = 0
+    model = CerebellarCNNAC2_old_2()
+
+    manifest_path = f"{DIR}/MANIFEST.csv"
+    if not os.path.exists(manifest_path):
+        with open(manifest_path, "w") as f:
+            f.write("trial_id,total_reward,config\n")
+        print("[TRAIN] MANIFEST.csv initialized.")
+    else:
+        print("[TRAIN] initializing from MANIFEST.csv")
+
+    with open(manifest_path, "r") as f:
+        lines = f.readlines()
+        last_trial_line = lines[-1].strip() if len(lines) > 1 else None
+
+    if last_trial_line:
+        print(f"[TRAIN] Last trial found: {last_trial_line}")
+        c = input("[TRAIN] Continue on last trial? (y/n): ")
+        if c.lower() == "y":
+            trial_num = int(last_trial_line.split(",")[0])
+            # recover start epoch
+            log_path = f"{DIR}/{trial_num}_train/LOG.csv"
+            if os.path.exists(log_path):
+                with open(log_path, "r") as f:
+                    reader = csv.reader(f)
+                    rows = list(reader)
+                    start_epoch = int(rows[-1][0]) + 1 if len(rows) > 1 else 0
+            model_pth = f"{DIR}/{trial_num}_train/model_params_{start_epoch-1}.pth"
+            if os.path.exists(model_pth):
+                print(f"[TRAIN] Loading model from {model_pth}")
+                model.load_state_dict(torch.load(model_pth))
+            else:
+                print(f"[WARN] No checkpoint found at {model_pth}. Starting fresh.")
+        elif c.lower() == "n":
+            trial_num = int(last_trial_line.split(",")[0]) + 1
+        else:
+            print("[TRAIN] Invalid input. Exiting.")
+            exit(1)
+    else:
+        trial_num = 0
+        print("[TRAIN] No previous trial found; starting new one.")
+
+    # -------------------------------
+    # 2. Prepare directories
+    # -------------------------------
+    dir_path = f"{DIR}/{trial_num}_train"
+    os.makedirs(dir_path, exist_ok=True)
+    os.makedirs(os.path.join(dir_path, "plots"), exist_ok=True)
+
+    print(f"\n[TRAIN] Trial: {trial_num}")
+    print(f"[TRAIN] Config: {cfg}")
+
+    # -------------------------------
+    # 3. Initialize environment/model
+    # -------------------------------
     env = Environment(cfg=cfg)
-    model = CerebellarCNNAC2()
-    train_dqn(env, model)  # episodes 등은 필요시 인자로 override
+
+    # -------------------------------
+    # 4. Start training
+    # -------------------------------
+    train_dqn(
+        env,
+        model,
+        DIR=DIR,
+        trial_num=trial_num,
+        start_epoch=start_epoch,
+        DEBUG=True
+    )

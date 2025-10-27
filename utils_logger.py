@@ -434,7 +434,7 @@ class SpikeHeatmap:
 
     def save_spikes(self, spikes):
         spikes = np.array(spikes, dtype = np.int32)
-        spikes.reshape(self.shape)
+        spikes=spikes.reshape(self.shape)
         self.spike_acc += spikes
     
     def plot(self, visualize = False):
