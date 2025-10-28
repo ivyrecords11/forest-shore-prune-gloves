@@ -238,12 +238,12 @@ class CerebellarCNNAC2(nn.Module):
         self.n_grc = n_grc*16
         self.n_pkj = n_pkj*9
         self.conv0_actor = nn.Conv2d(1, 1, kernel_size = 1, stride = 1, padding='valid', bias = False)
-        self.lif0_actor = neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.lif0_actor = neuron.LIFNode(tau=cfg.integral_decay, surrogate_function=surrogate.ATan(), detach_reset=False)
         self.conv1_actor = nn.Conv2d(2, n_grc, kernel_size=4, stride=2, padding='valid', bias=False)
-        self.lif1_actor = neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.lif1_actor = neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan(), detach_reset=False)
 
         self.conv2_actor = nn.Conv2d(self.n_grc, n_pkj, kernel_size=2, stride=1, padding='valid', bias=False)
-        self.lif2_actor = neuron.LIFNode(tau=cfg.t_pkj, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.lif2_actor = neuron.LIFNode(tau=cfg.t_pkj, surrogate_function=surrogate.ATan(), detach_reset=False)
 
         self.flatten_actor = nn.Flatten()
         self.pkj_actor = nn.Linear(self.n_grc, self.n_pkj, bias=False)

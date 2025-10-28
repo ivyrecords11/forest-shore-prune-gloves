@@ -13,7 +13,7 @@ class SimulationConfig:
     n_mf : int = 100                            # 센서 개수     
     max_firing_rate: float = 200                # 센서 최대 발화율 (Hz)
     transmitt_speed: float = 100                 # 신경 전송 속도 [m/s]
-    sigma: float = 5                         # 센서 노이즈 표준편차 - 반지름과 곱해짐
+    sigma: float = 3                         # 센서 노이즈 표준편차 - 반지름과 곱해짐
 
     # NEURONAL PARAMETERS
     tau_pre_ms: float = 5.0                     # STDP 전-시냅스 가중치 변화 시간상수 (ms)
@@ -21,6 +21,7 @@ class SimulationConfig:
     tau_e_ms: float = 50                        # 시냅스 효율 시간상수 (s)
     tau: float = 4.0
     t_pkj: float = 2.0
+    integral_decay: float = 16.0
 
     n_grc: int = 8 # num_filters, *36
     n_goc: int = 2
@@ -49,12 +50,12 @@ class SimulationConfig:
     # PHYSICAL PARAMETERS
     plate_size: float = 0.3 # (m)
     ball_mass: float = None                     # 공 질량 (kg), None이면 리셋 시 무작위
-    ball_density: int = 1600                    # kg/m^3, fe
+    ball_density: int = 2000                    # kg/m^3, fe
 
     # MOTOR PARAMETERS
     n_motor: int = 4      # 제어할 모터 수
     motor_mode: str = 'spikes'                #motor_neuron or spikes
-    motor_decay: float = 5.0                        #모터뉴런 복구 계수
+    motor_decay: float = 4.0                        #모터뉴런 복구 계수
     motor_damping: float = 3.0                      #링버퍼 제어 x - 제어 신호 - 모터 사이 순간 기울기 완화
     motor_gain: float = 1.0                        # 모터 제어 신호 이득
     motor_max_hinge_deg: float = 10.0                  # 판 최대 경사각 [deg]  

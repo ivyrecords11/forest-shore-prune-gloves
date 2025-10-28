@@ -3,9 +3,9 @@ DEBUG           = True
 DEBUG_XML       = False
 DEBUG_INIT      = DEBUG and True
 DEBUG_RESET     = DEBUG and False
-DEBUG_SENSOR    = DEBUG and True
+DEBUG_SENSOR    = DEBUG and False
 DEBUG_DELAY     = DEBUG and False
-DEBUG_STEP      = DEBUG and True
+DEBUG_STEP      = DEBUG and False
 
 
 

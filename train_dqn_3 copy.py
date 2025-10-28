@@ -188,7 +188,7 @@ def apply_weight_init_from_cfg(model, weight_init: str):
 # =========================
 def train_dqn(env, model, *,
               episodes: int = None,
-              gamma: float = 0.5,
+              gamma: float = 0.2,
               max_grad_norm: float = 1.0,
               target_update_mode: str = "soft",   # "soft" | "hard"
               tau: float = 0.01,
@@ -399,7 +399,7 @@ if __name__ == '__main__':
     # -------------------------------
     # 0. Create main directory
     # -------------------------------
-    DIR = "./TRAIN_PPO"
+    DIR = "./TRAIN_DQN"
     os.makedirs(DIR, exist_ok=True)
 
     # -------------------------------
