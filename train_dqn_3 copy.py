@@ -98,7 +98,6 @@ def dqn_optimize(model, target, buffer, optimizer, batch_size, gamma, max_grad_n
     r, d  = r.to(device), d.to(device)
 
     # --- Q(s):  T steps, use actor membrane potential as Q
-    from spikingjelly.activation_based import functional
     #functional.reset_net(model.actor)
     for _ in range(model.T):
         _ = model.forward(s)
@@ -188,7 +187,7 @@ def apply_weight_init_from_cfg(model, weight_init: str):
 # =========================
 def train_dqn(env, model, *,
               episodes: int = None,
-              gamma: float = 0.2,
+              gamma: float = 0.1,
               max_grad_norm: float = 1.0,
               target_update_mode: str = "soft",   # "soft" | "hard"
               tau: float = 0.01,
@@ -209,13 +208,16 @@ def train_dqn(env, model, *,
     T  = int(cfg.T)
     model.T = T
     max_steps_per_ep = int(cfg.simulation_duration_s / cfg.dt)
-    start_learning = max(cfg.num_steps, 512)
+    if start_epoch < 2:
+        start_learning = 30000
+    else: 
+        start_learning = max(cfg.num_steps, 512)
     train_freq = 4
     batch_size = cfg.num_steps
-    buffer_size = max_steps_per_ep * 50
+    buffer_size = min(max_steps_per_ep * 50, 50000)
 
     if episodes is None:
-        episodes = 500
+        episodes = 50
     max_epochs = episodes  # 요청 코드와 호환
 
     apply_weight_init_from_cfg(model, cfg.weight_init)
