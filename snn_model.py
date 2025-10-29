@@ -11,6 +11,10 @@ from config import SimulationConfig
 DEBUG_MONITOR = False
 cfg = SimulationConfig()
 
+"""
+사용중인 것들: cerebellarcnnac2
+"""
+
 class NonSpikingLIFNode(neuron.LIFNode):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -39,6 +43,18 @@ class NonSpikingLIFNode(neuron.LIFNode):
                 else:
                     self.v = self.neuronal_charge_no_decay_input(x, self.v, self.v_reset, self.tau)
         return self.v
+'''
+class SelfInhibitLIFNode(neuron.LIFNode):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    def reset(self):
+        if isinstance(self.v, torch.Tensor):
+            with torch.no_grad():
+                self.v.zero_()
+    def single_step_forward(self, x):
+        self.v_float_to_tensor(x)
+      '''  
+    
 
 class CerebellarCNNAC2_old(nn.Module):
     def __init__(self, n_grc=cfg.n_grc, n_pkg=cfg.n_pkj, n_motor=4, tau=cfg.tau, T=cfg.T, std = 0.0, log = False):
@@ -327,6 +343,9 @@ class CerebellarCNNAC2(nn.Module):
             self.spike_monitor.clear_recorded_data()
             self.potential_monitor.clear_recorded_data()
             self.input_monitor.clear_recorded_data()
+
+
+
 
 class SpikingNet(nn.Module):
     def __init__(self, n_grc=1024, n_pkj=60, n_motor=4, tau=cfg.tau, T=cfg.T, std = 0.0, log = False):

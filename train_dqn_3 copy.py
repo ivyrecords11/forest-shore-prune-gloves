@@ -231,7 +231,7 @@ def train_dqn(env, model, *,
     rb = ReplayBuffer(buffer_size)
     n_actions = 4
 
-    eps_start, eps_end = 1.0, 0.05
+    eps_start, eps_end = cfg.epsilon_start, cfg.epsilon_end
     eps_decay_steps = max(10_000, cfg.num_steps * 100)
     eps = eps_start
     eps_decay = (eps_start - eps_end) / eps_decay_steps

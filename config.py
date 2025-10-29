@@ -6,7 +6,9 @@ class SimulationConfig:
     dt: float = 1e-3                            # 시뮬레이션 시간 간격 (ms) 1
     eta: float = 1e-3                           # 학습률 (alpha)
     seed: int = None                            # 난수 시드
-    T: int = 1                               
+    T: int = 1        
+    epsilon_start: float = 0
+    epsilon_end: float = 0.5                       
 
     # SENSOR PARAMETERS
     n_sensor_1d: int = 10
@@ -43,7 +45,7 @@ class SimulationConfig:
     # every reward scale is per second
     simulation_duration_s: float = 10.0         # 각 에피소드 시뮬레이션 시간 (초)
     success_duration_s: float = 3.0             # 성공으로 간주할 연속 시간 (초)
-    num_steps: int = 32                          # rollout length before an update (A2C)
+    num_steps: int = 128                          # rollout length before an update (A2C)
     success_reward_per_sec: float = 10000
     penalize_failure_per_sec: float = 10000
 
