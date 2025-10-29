@@ -686,7 +686,7 @@ class SpikingCNN(nn.Module):
         self.mf2goc = nn.Conv2d(1, c_goc, kernel_size = 4, stride = 2, padding = 1, bias = False)
         self.pf2pkj = nn.Conv2d(c_grc+c_goc, c_pkj, kernel_size = 3, stride = 2, padding = 'valid', bias=False)
         
-        self.pf2mli = nn.Linear(n_grc+n_goc, n_mli, bias=False)
+        self.pf2mli = nn.Linear((c_grc+c_goc)*25, n_mli, bias=False)
         self.mli2pkj = nn.Linear(n_mli, n_pkj, bias=False)
         self.pkj2motor = nn.Linear(n_pkj, n_motor, bias=False)
         self.grc = neuron.LIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True)
@@ -694,7 +694,7 @@ class SpikingCNN(nn.Module):
         self.pkj = neuron.LIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True)
         self.mli = neuron.LIFNode(tau=8.0, surrogate_function=surrogate.ATan(), detach_reset=True)
         self.motor =neuron.LIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True)
-        self.motor_state = NonSpikingLIFNode(tau=16.0)
+        self.motor_state = nn.Softmax(dim=1)
         
         A = torch.tensor([
             [0,1,0,0],
@@ -735,19 +735,20 @@ class SpikingCNN(nn.Module):
         
         goc = -self.goc(self.mf2goc(mf))
         grc = self.grc(self.mf2grc(mf))
-        print(grc.shape, goc.shape)
+        #print(grc.shape, goc.shape)
         pf = torch.cat((grc, goc), dim=-3) #channel
-        print(grc.shape, goc.shape, pf.shape)
-        mli = -self.mli(self.pf2mli(torch.flatten(pf)))
-        pkj = self.pkj(self.flatten(self.pf2pkj(pf)) + mli)
+        #print(grc.shape, goc.shape, pf.shape)
+        mli = -self.mli(self.pf2mli(torch.flatten(pf, start_dim=1)))
+        pkj = self.pkj(torch.flatten(self.pf2pkj(pf), start_dim=-3) + self.mli2pkj(mli))
         pkj2motor = self.pkj2motor(pkj)
-        motor = self.motor(pkj2motor)
+        #motor = self.motor(pkj2motor)
         
-        inh = motor @ self.A_mask
-        pkj2motor = pkj2motor - 0.5 * inh #alpha
-        motor_state = self.motor_state(pkj2motor)
+        #inh = pkj2motor @ self.A_mask
+        #pkj2motor = pkj2motor - 0.5 * inh #alpha
+        #motor_state = self.motor_state(pkj2motor)
+        motor_state = self.motor_state(pkj2motor) #softmax.
         return motor_state
-        
+    '''    
     def set_logging(self, flag: bool):
         self.log = flag
         if self.log == True:
@@ -755,9 +756,9 @@ class SpikingCNN(nn.Module):
             self.spike_monitor = monitor.OutputMonitor(net=self, instance=neuron.LIFNode, )
             self.potential_monitor = monitor.AttributeMonitor(net=self, pre_forward=False, instance=neuron.LIFNode, attribute_name='v')
         else:
-            monitor.InputMonitor.disable()
-            monitor.OutputMonitor.disable()
-            monitor.AttributeMonitor.disable()
+            monitor.InputMonitor.disable(InputMonitor)
+            monitor.OutputMonitor.disable(OutputMonitor)
+            monitor.AttributeMonitor.disable(Attribute)
             self.input_monitor = None
             self.spike_monitor = None
             self.potential_monitor = None
@@ -784,4 +785,4 @@ class SpikingCNN(nn.Module):
         if self.log == True:
             self.spike_monitor.clear_recorded_data()
             self.potential_monitor.clear_recorded_data()
-            self.input_monitor.clear_recorded_data()
+            self.input_monitor.clear_recorded_data()'''

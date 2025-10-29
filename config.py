@@ -7,15 +7,15 @@ class SimulationConfig:
     eta: float = 1e-3                           # 학습률 (alpha)
     seed: int = None                            # 난수 시드
     T: int = 1        
-    epsilon_start: float = 0
-    epsilon_end: float = 0.5                       
+    epsilon_start: float = 1
+    epsilon_end: float = 0.05                       
 
     # SENSOR PARAMETERS
     n_sensor_1d: int = 10
     n_mf : int = 100                            # 센서 개수     
     max_firing_rate: float = 200                # 센서 최대 발화율 (Hz)
     transmitt_speed: float = 100                 # 신경 전송 속도 [m/s]
-    sigma: float = 3                         # 센서 노이즈 표준편차 - 반지름과 곱해짐
+    sigma: float = 1                         # 센서 노이즈 표준편차 - 반지름과 곱해짐
 
     # NEURONAL PARAMETERS
     tau_pre_ms: float = 5.0                     # STDP 전-시냅스 가중치 변화 시간상수 (ms)

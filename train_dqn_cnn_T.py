@@ -63,20 +63,28 @@ class ReplayBuffer:
 # 4) Q값(=actor 마지막 전위) 계산 유틸
 # =========================
 @torch.no_grad()
-def q_values_from_model(model, obs_batch):
-    # obs_batch: (B, 1, H, W)
-    assert obs_batch.shape == (1,1,10,10), f"[!]obs_batch:{obs_batch}"
-    model.train(False)
-    #functional.reset_net(model.actor)
+def q_values_from_model(model, obs_batch: torch.Tensor):
+    # obs_batch: (B, 1, 10, 10) 또는 (1, 1, 10, 10)
+    if obs_batch.dim() == 4 and obs_batch.shape[1:] == (1,10,10):
+        pass
+    elif obs_batch.dim() == 3 and obs_batch.shape == (1,10,10):
+        obs_batch = obs_batch.unsqueeze(0)
+    else:
+        raise AssertionError(f"[!] obs_batch.shape={obs_batch.shape}, 기대 (B,1,10,10)")
+
+    # 배치마다 상태 리셋 (SNN 필수)
+    from spikingjelly.activation_based import functional
+    functional.reset_net(model)   # ← 중요! 배치/샘플 경계마다
+    model.eval()
+
+    # T 스텝 누적 전파
+    out = None
     for _ in range(model.T):
-        #action = model.actor(obs_batch)
-        #print(obs_batch, action)
-        q = model.forward(obs_batch)
-    assert q[-1].shape == torch.Size([4]), f"q[0]: {q[0]}, q: {q}"
-    #print(q)
-    #print("==========================================================")
-    #print(action)
-    return q[-1]# (B, n_actions)
+        out = model.forward(obs_batch)   # 기대 shape: (B, A)
+
+    assert out.dim() == 2, f"[!] q-values shape={out.shape}, 기대 (B, A)"
+    return out  # (B, A)
+
 
 # =========================
 # 5) DQN 최적화 스텝
@@ -142,30 +150,31 @@ def hard_update(target, online):
 # 7) ε-탐욕 정책
 # =========================
 
-def select_action_epsilon_greedy(model, obs, eps, n_actions, device):
-    """
-    ε-greedy for multi-controller (e.g., 4 outputs).
-    Returns the raw Q-value vector (no clipping, no tanh).
-
-    - With probability ε, replace ONE random element with a random value.
-    - Otherwise, use the model output as-is.
-    """
+def select_action_epsilon_greedy(model, obs_np, eps, n_actions, device):
+    # obs_np: (1,10,10) 또는 (B,1,10,10) np.ndarray
     with torch.no_grad():
-        obs_t = torch.from_numpy(obs).float().unsqueeze(0).to(device)  # (1,1,H,W)
-        assert obs_t.shape==(1,1,10,10), "[!] shape이 맞지 않음."
-        q_values = q_values_from_model(model, obs_t).squeeze(0)        # (n_actions,)
-        #assert q_values.shape == torch.Size([n_actions]), f"q_values.shape은 {q_values.shape}임"
-        # obs_batch도 가능, 근데 단일임.
-    # Convert to numpy for env
-    action = q_values.clone()
+        obs_t = torch.from_numpy(obs_np).float()
+        if obs_t.dim() == 3:      # (1,10,10) -> (1,1,10,10)
+            obs_t = obs_t.unsqueeze(0)
+        assert obs_t.shape[1:] == (1,10,10)
+        obs_t = obs_t.to(device)
 
-    if random.random() < eps:
-        rand_idx = random.randint(0, n_actions - 1)
-        rand_val = random.uniform(float(q_values.min()), float(q_values.max()))
-        action[rand_idx] = rand_val
-        # optional debug:         print(f"[ε-greedy] Randomized controller[{rand_idx}] = {rand_val:.3f}")
+        q = q_values_from_model(model, obs_t)      # (B, A)
+        B, A = q.shape
+        actions = q.clone()
 
-    return action.cpu().numpy()  # shape: (n_actions,)
+        # ε-greedy: 샘플별로 한 요소만 랜덤 치환
+        do_rand = torch.rand(B, device=q.device) < float(eps)
+        rand_idx = torch.randint(0, n_actions, (B,), device=q.device)
+        q_min, q_max = q.min(dim=1).values, q.max(dim=1).values
+        rand_val = torch.rand(B, device=q.device) * (q_max - q_min) + q_min
+        rows = torch.nonzero(do_rand, as_tuple=False).squeeze(1)
+        if rows.numel() > 0:
+            actions[rows, rand_idx[rows]] = rand_val[rows]
+
+    # env가 단일 벡터를 원하면 배치=1에서 (A,)로 꺼내기
+    return actions[0].detach().cpu().numpy() if B == 1 else actions.detach().cpu().numpy()
+
 
 # =========================
 # 8) (선택) 가중치 초기화: cfg.weight_init 반영

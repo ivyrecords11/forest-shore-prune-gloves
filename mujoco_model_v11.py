@@ -339,10 +339,10 @@ class Environment(Env):
         """
         Lx, Ly = self.cfg.plate_size, self.cfg.plate_size
         #if DEBUG: print(action_edge)
-        zL, zR, zF, zB = (action_edge)*self.motor_gain*(-1)
-        theta_x = (zF - zB) / Ly
-        theta_y = (zL - zR) / Lx
-        h0 = (zL + zR + zB + zF) / 4.0
+        zR, zL, zB, zF = (action_edge)*self.motor_gain
+        theta_x = (zB - zF) / Ly
+        theta_y = (zR - zL) / Lx
+        h0 = -(zL + zR + zB + zF) / 4.0
         return theta_x, theta_y, h0
     
     def sensor_inputs(self, flatten=True):
