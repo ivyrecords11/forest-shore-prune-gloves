@@ -8,7 +8,7 @@ class SimulationConfig:
     seed: int = None                            # 난수 시드
     T: int = 1        
     epsilon_start: float = 1
-    epsilon_end: float = 0.05                       
+    epsilon_end: float = 0.00                       
 
     # SENSOR PARAMETERS
     n_sensor_1d: int = 10

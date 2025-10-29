@@ -189,7 +189,7 @@ def apply_weight_init_from_cfg(model, weight_init: str):
 # =========================
 def train_dqn(env, model, *,
               episodes: int = None,
-              gamma: float = 0.3,
+              gamma: float = 0.05,
               max_grad_norm: float = 1.0,
               target_update_mode: str = "soft",   # "soft" | "hard"
               tau: float = 0.01,

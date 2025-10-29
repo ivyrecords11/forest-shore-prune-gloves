@@ -694,7 +694,7 @@ class SpikingCNN(nn.Module):
         self.pkj = neuron.LIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True)
         self.mli = neuron.LIFNode(tau=8.0, surrogate_function=surrogate.ATan(), detach_reset=True)
         self.motor =neuron.LIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True)
-        self.motor_state = nn.Softmax(dim=1)
+        self.motor_state = NonSpikingLIFNode(tau = 8.0)
         
         A = torch.tensor([
             [0,1,0,0],
@@ -741,13 +741,12 @@ class SpikingCNN(nn.Module):
         mli = -self.mli(self.pf2mli(torch.flatten(pf, start_dim=1)))
         pkj = self.pkj(torch.flatten(self.pf2pkj(pf), start_dim=-3) + self.mli2pkj(mli))
         pkj2motor = self.pkj2motor(pkj)
-        #motor = self.motor(pkj2motor)
+        motor = self.motor_state(pkj2motor)
         
-        #inh = pkj2motor @ self.A_mask
-        #pkj2motor = pkj2motor - 0.5 * inh #alpha
-        #motor_state = self.motor_state(pkj2motor)
-        motor_state = self.motor_state(pkj2motor) #softmax.
-        return motor_state
+        inh = (pkj2motor * motor) @ self.A_mask
+        pkj2motor = pkj2motor - 0.5 * inh #alpha
+        motor_state = self.motor_state(pkj2motor) 
+        return pkj2motor
     '''    
     def set_logging(self, flag: bool):
         self.log = flag
