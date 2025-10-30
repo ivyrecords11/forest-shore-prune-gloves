@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.nn.utils import clip_grad_norm_
 from torch.distributions import Bernoulli, Normal
+from torchinfo import summary
 from spikingjelly.activation_based import functional, neuron, surrogate, monitor
 from config import SimulationConfig
 DEBUG_MONITOR = False
@@ -44,7 +45,34 @@ class NonSpikingLIFNode(neuron.LIFNode):
                 else:
                     self.v = self.neuronal_charge_no_decay_input(x, self.v, self.v_reset, self.tau)
         return self.v
+class NonSpikingParametricLIFNode(neuron.ParametricLIFNode):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    def reset(self): 
+        # 기존: self.v = torch.tensor(0.0)  # 디바이스/그래프 끊기고 새 텐서 생성 -> 누수/성능저하
+        if isinstance(self.v, torch.Tensor):
+            with torch.no_grad():
+                self.v.zero_()
 
+
+    def single_step_forward(self, x: torch.Tensor):
+        self.v_float_to_tensor(x)
+
+        if self.training:
+            self.neuronal_charge(x)
+        else:
+            if self.v_reset is None:
+                if self.decay_input:
+                    self.v = self.neuronal_charge_decay_input_reset0(x, self.v, self.tau)
+                else:
+                    self.v = self.neuronal_charge_no_decay_input_reset0(x, self.v, self.tau)
+                
+            else:
+                if self.decay_input:
+                    self.v = self.neuronal_charge_decay_input(x, self.v, self.v_reset, self.tau)
+                else:
+                    self.v = self.neuronal_charge_no_decay_input(x, self.v, self.v_reset, self.tau)
+        return self.v
 class SelfInhibitLIFNode(neuron.LIFNode):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -682,19 +710,20 @@ class SpikingCNN(nn.Module):
         c_goc = 8  # 10*10 -> 2*2*n_goc -> linear, output features = *25 = 
         c_pkj = 8
         
-        self.mf2grc = nn.Conv2d(1, c_grc, kernel_size = 2, stride = 2, padding = 'valid', bias = False)
-        self.mf2goc = nn.Conv2d(1, c_goc, kernel_size = 4, stride = 2, padding = 1, bias = False)
-        self.pf2pkj = nn.Conv2d(c_grc+c_goc, c_pkj, kernel_size = 3, stride = 2, padding = 'valid', bias=False)
-        
-        self.pf2mli = nn.Linear((c_grc+c_goc)*25, n_mli, bias=False)
-        self.mli2pkj = nn.Linear(n_mli, n_pkj, bias=False)
-        self.pkj2motor = nn.Linear(n_pkj, n_motor, bias=False)
+        self.mf2grc = nn.Conv2d(1, c_grc, kernel_size = 2, stride = 2, padding = 'valid')
+        self.mf2goc = nn.Conv2d(1, c_goc, kernel_size = 4, stride = 2, padding = 1)
+        self.pf2pkj = nn.Conv2d(c_grc+c_goc, c_pkj, kernel_size = 3, stride = 2, padding = 'valid')
+        self.pf2mli = nn.Linear((c_grc+c_goc)*25, n_mli)
+        self.mli2pkj = nn.Linear(n_mli, n_pkj)
+        self.pkj2motor = nn.Linear(n_pkj, n_motor)
         self.grc = neuron.LIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True)
         self.goc = neuron.LIFNode(tau=32.0, surrogate_function=surrogate.ATan(), detach_reset=True)
         self.pkj = neuron.LIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True)
         self.mli = neuron.LIFNode(tau=8.0, surrogate_function=surrogate.ATan(), detach_reset=True)
         self.motor =neuron.LIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True)
         self.motor_state = NonSpikingLIFNode(tau = 8.0)
+        self.sigmoid = nn.Sigmoid()
+        self.leaky = nn.LeakyReLU()
         
         A = torch.tensor([
             [0,1,0,0],
@@ -746,6 +775,7 @@ class SpikingCNN(nn.Module):
         inh = (pkj2motor * motor) @ self.A_mask
         pkj2motor = pkj2motor - 0.5 * inh #alpha
         motor_state = self.motor_state(pkj2motor) 
+        motor_output = self.leaky(motor_state)
         return pkj2motor
     '''    
     def set_logging(self, flag: bool):
@@ -785,3 +815,206 @@ class SpikingCNN(nn.Module):
             self.spike_monitor.clear_recorded_data()
             self.potential_monitor.clear_recorded_data()
             self.input_monitor.clear_recorded_data()'''
+            
+            
+class SpikingCNN1_4(nn.Module):
+    def __init__(self, 
+                 n_grc = 16*25, # 1024 corresponds to 16*64c
+                 n_goc = 2*25,
+                 n_mli = 16, 
+                 n_pkj = 2*4, 
+                 n_motor=4, 
+                 T=cfg.T, 
+                 log = False):
+        super(SpikingCNN1_4, self).__init__()
+        c_grc = 16 # 10*10 -> 5*5*n_grc -> linear, output features = 64*25 = 1600
+        c_goc = 2  # 10*10 -> 2*2*n_goc -> linear, output features = *25 = 
+        c_pkj = 2
+        
+        self.mf2grc     = nn.Conv2d(1, c_grc, kernel_size = 2, stride = 2, padding = 'valid', bias=False)
+        self.mf2goc     = nn.Conv2d(1, c_goc, kernel_size = 4, stride = 2, padding = 1, bias=False)
+        self.pf2pkj     = nn.Conv2d(c_grc+c_goc, c_pkj, kernel_size = 3, stride = 2, padding = 'valid', bias=False)
+        self.pf2mli     = nn.Linear((c_grc+c_goc)*25, n_mli, bias=False)
+        self.mli2pkj    = nn.Linear(n_mli, n_pkj, bias=False)
+        self.pkj2motor  = nn.Linear(n_pkj, n_motor, bias=False)
+        self.grc        = neuron.LIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.goc        = neuron.LIFNode(tau=32.0, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.pkj        = neuron.LIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.mli        = neuron.LIFNode(tau=8.0, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.motor      = neuron.LIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.motor_state = NonSpikingLIFNode(tau = 8.0)
+        self.sigmoid    = nn.Sigmoid()
+        self.leaky      = nn.LeakyReLU()
+        self.relu       = nn.ReLU()
+        
+        A = torch.tensor([
+            [0,1,0,0],
+            [1,0,0,0],
+            [0,0,0,1],
+            [0,0,1,0],
+        ], dtype=torch.float32) # 반대방향 inhibit
+        self.register_buffer("A_mask", A)
+
+        self.log = log
+        self.T = T
+        
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                torch.nn.init.kaiming_normal_(m.weight.data)
+            if isinstance(m, nn.Conv2d):
+                torch.nn.init.kaiming_normal_(m.weight.data)
+            if isinstance(m, neuron.LIFNode):
+                m.store_v_seq = False
+                
+        summary(self, (1, 1, 10, 10))
+        
+        
+    
+    def forward(self, mf):
+        """
+        mf: 센서 입력
+        cf: 전 단 모터뉴런 출력
+        motor: 모터뉴런 전위(출력)
+        """
+        '''dmf=mf.clone()
+        mf=self.lif0_actor(self.conv0_actor(mf))
+        #print(x.shape, dx.shape)
+        #input shape
+        if mf.shape[0] < dmf.shape[0]:
+            mf=mf.repeat(dmf.shape[0], 1, 1, 1)
+        elif mf.shape[0] > dmf.shape[0]:
+            mf=mf[0].unsqueeze(0)
+        #print(x.shape)
+        mf = torch.cat((mf, dmf), dim = -3)'''
+        
+        goc = -self.goc(self.mf2goc(mf))
+        grc = self.grc(self.mf2grc(mf))
+        #print(grc.shape, goc.shape)
+        pf = torch.cat((grc, goc), dim=-3) #channel
+        #print(grc.shape, goc.shape, pf.shape)
+        mli = -self.mli(self.pf2mli(torch.flatten(pf, start_dim=1)))
+        pkj = self.pkj(torch.flatten(self.pf2pkj(pf), start_dim=-3) + self.mli2pkj(mli))
+        pkj2motor = self.pkj2motor(pkj)
+        motor = self.motor_state(pkj2motor)
+        
+        inh = (pkj2motor * motor) @ self.A_mask
+        pkj2motor = pkj2motor - 0.5 * inh #alpha
+        motor_state = self.motor_state(pkj2motor) 
+        motor_output = self.relu(motor_state)
+        return pkj2motor
+
+if __name__ == "__main__":
+    scnn = SpikingCNN()
+    print(scnn)
+    summary(scnn, (1, 1, 10, 10))
+    param_names = [name for name in scnn.state_dict().keys()]
+    for pn in param_names:
+        print(pn, scnn.state_dict()[pn].shape)
+    
+    scnn1_4 = SpikingCNN1_4()
+    print(scnn1_4)
+    summary(scnn1_4, (1, 1, 10, 10))
+    param_names = [name for name in scnn1_4.state_dict().keys()]
+    for pn in param_names:
+        print(pn, scnn1_4.state_dict()[pn].shape)
+        
+class SpikingTCNN(nn.Module):
+    def __init__(self, 
+                 n_grc = 16*25, # 1024 corresponds to 16*64c
+                 n_goc = 2*25,
+                 n_mli = 16, 
+                 n_pkj = 2*4, 
+                 n_motor=4, 
+                 T=cfg.T, 
+                 log = False):
+        super(SpikingCNN1_4, self).__init__()
+        c_grc = 16 # 10*10 -> 5*5*n_grc -> linear, output features = 64*25 = 1600
+        c_goc = 2  # 10*10 -> 2*2*n_goc -> linear, output features = *25 = 
+        c_pkj = 2
+        
+        self.mf2grc     = nn.Conv2d(1, c_grc, kernel_size = 2, stride = 2, padding = 'valid', bias=False)
+        self.mf2goc     = nn.Conv2d(1, c_goc, kernel_size = 4, stride = 2, padding = 1, bias=False)
+        self.pf2pkj     = nn.Conv2d(c_grc+c_goc, c_pkj, kernel_size = 3, stride = 2, padding = 'valid', bias=False)
+        self.pf2mli     = nn.Linear((c_grc+c_goc)*25, n_mli, bias=False)
+        self.mli2pkj    = nn.Linear(n_mli, n_pkj, bias=False)
+        self.pkj2motor  = nn.Linear(n_pkj, n_motor, bias=False)
+        self.grc        = neuron.LIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.goc        = neuron.LIFNode(tau=32.0, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.pkj        = neuron.LIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.mli        = neuron.LIFNode(tau=8.0, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.motor      = neuron.LIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.motor_state = NonSpikingLIFNode(tau = 8.0)
+        self.sigmoid    = nn.Sigmoid()
+        self.leaky      = nn.LeakyReLU()
+        self.relu       = nn.ReLU()
+        
+        A = torch.tensor([
+            [0,1,0,0],
+            [1,0,0,0],
+            [0,0,0,1],
+            [0,0,1,0],
+        ], dtype=torch.float32) # 반대방향 inhibit
+        self.register_buffer("A_mask", A)
+
+        self.log = log
+        self.T = T
+        
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                torch.nn.init.kaiming_normal_(m.weight.data)
+            if isinstance(m, nn.Conv2d):
+                torch.nn.init.kaiming_normal_(m.weight.data)
+            if isinstance(m, neuron.LIFNode):
+                m.store_v_seq = False
+                
+        summary(self, (1, 1, 10, 10))
+        
+        
+    
+    def forward(self, mf):
+        """
+        mf: 센서 입력
+        cf: 전 단 모터뉴런 출력
+        motor: 모터뉴런 전위(출력)
+        """
+        '''dmf=mf.clone()
+        mf=self.lif0_actor(self.conv0_actor(mf))
+        #print(x.shape, dx.shape)
+        #input shape
+        if mf.shape[0] < dmf.shape[0]:
+            mf=mf.repeat(dmf.shape[0], 1, 1, 1)
+        elif mf.shape[0] > dmf.shape[0]:
+            mf=mf[0].unsqueeze(0)
+        #print(x.shape)
+        mf = torch.cat((mf, dmf), dim = -3)'''
+        
+        goc = -self.goc(self.mf2goc(mf))
+        grc = self.grc(self.mf2grc(mf))
+        #print(grc.shape, goc.shape)
+        pf = torch.cat((grc, goc), dim=-3) #channel
+        #print(grc.shape, goc.shape, pf.shape)
+        mli = -self.mli(self.pf2mli(torch.flatten(pf, start_dim=1)))
+        pkj = self.pkj(torch.flatten(self.pf2pkj(pf), start_dim=-3) + self.mli2pkj(mli))
+        pkj2motor = self.pkj2motor(pkj)
+        motor = self.motor_state(pkj2motor)
+        
+        inh = (pkj2motor * motor) @ self.A_mask
+        pkj2motor = pkj2motor - 0.5 * inh #alpha
+        motor_state = self.motor_state(pkj2motor) 
+        motor_output = self.relu(motor_state)
+        return pkj2motor
+
+if __name__ == "__main__":
+    scnn = SpikingCNN()
+    print(scnn)
+    summary(scnn, (1, 1, 10, 10))
+    param_names = [name for name in scnn.state_dict().keys()]
+    for pn in param_names:
+        print(pn, scnn.state_dict()[pn].shape)
+    
+    scnn1_4 = SpikingCNN1_4()
+    print(scnn1_4)
+    summary(scnn1_4, (1, 1, 10, 10))
+    param_names = [name for name in scnn1_4.state_dict().keys()]
+    for pn in param_names:
+        print(pn, scnn1_4.state_dict()[pn].shape)

@@ -9,7 +9,7 @@ from torch.distributions import Bernoulli, Normal
 from spikingjelly.activation_based import functional, neuron, surrogate, monitor
 from config import SimulationConfig
 from mujoco_model_v6 import Environment
-from snn_model import CerebellarCNNAC2       # <- CerebellarCNNAC2 정의가 있는 모듈로 교체
+from snn_model import CerebellarCNNAC2, SpikingCNN       # <- CerebellarCNNAC2 정의가 있는 모듈로 교체
 from datetime import datetime
 
 cfg = SimulationConfig()
@@ -86,15 +86,7 @@ def validate(DIR: str, trial_num: str, pth_or_dir: str,
     n_actions = int(getattr(cfg, "n_motor", 4))
 
     # 모델 구성 (cfg 기반)
-    model = CerebellarCNNAC2(
-        n_grc=getattr(cfg, "n_grc", 8),
-        n_pkg=32,
-        n_motor=n_actions,
-        tau=getattr(cfg, "tau", 2.0),
-        T=getattr(cfg, "T", 32),
-        std=0.0,
-        log=False,
-    ).to(device)
+    model = SpikingCNN().to(device)
     model.eval()
 
     # 체크포인트 로드
@@ -205,7 +197,7 @@ def main():
 python validate_dqn.py --dir ./runs --trial 0001 --pth ./runs --episodes 20
 
 # 특정 체크포인트로 검증
-python validate_dqn.py --dir ./runs --trial 0001 --pth ./runs/0001_train/model_params_500.pth --episodes 10 --render
+python validate_dqn.py --dir ./runs --trial 0001 --pth TRAIN_DQN_CNN\0_train\model_csv\model_params_1270.csv --episodes 10 --render
 
 """
 

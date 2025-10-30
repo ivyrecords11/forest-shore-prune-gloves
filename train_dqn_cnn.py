@@ -479,7 +479,7 @@ def main():
         DEBUG=True
     )
 if __name__ == '__main__':
-    for i in range(50):
+    for i in range(500):
         main()
         os.system('cls' if os.name == 'nt' else 'clear')
         gc.collect()

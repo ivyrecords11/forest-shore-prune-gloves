@@ -207,16 +207,13 @@ def train_dqn(env, model, *,
     T  = int(cfg.T)
     model.T = T
     max_steps_per_ep = int(cfg.simulation_duration_s / cfg.dt)#50000
-    if start_epoch < 2:
-        start_learning = 30000
-    else: 
-        start_learning = max(cfg.num_steps, 512)
+    start_learning = cfg.num_steps#max(cfg.num_steps, 512)
     train_freq = 4
     batch_size = cfg.num_steps
     buffer_size = min(max_steps_per_ep * 50, 50000)
 
     if episodes is None:
-        episodes = 30
+        episodes = 10
     max_epochs = episodes  # 요청 코드와 호환
 
     apply_weight_init_from_cfg(model, cfg.weight_init)

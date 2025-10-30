@@ -1,0 +1,2 @@
+epoch,datetime,duration,total_reward,ball_x,ball_y,ball_mass_g,terminated,truncated,total_reward_per_L1_dist
+1,10/30 11:14:29,3168,-98082.84934615137,0.10084522515535355,-0.1071462333202362,29.131277919150627,False,True,-15566216.0

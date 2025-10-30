@@ -6,12 +6,6 @@ import numpy as np
 cfg = SimulationConfig
 
 DEBUG = True
-# if true, print 
-
-"""
-Conv
-Fc
-"""
 
 # TODO: Parameter 불러오기
 # TODO: 뉴런 설계
@@ -43,13 +37,11 @@ class wip_LIFNeuron():
 
         dv = ( -v + I ) * (dt / tau)
         v = v + dv
-
         if v >= v_th:
             spike = 1
             v = v_reset
         else:
             spike = 0
-
         return v, spike
 
 
@@ -84,6 +76,7 @@ s_pkj = np.zeros(N_PKJ)
 s_bkc = np.zeros(N_BKC)
 s_motor = np.zeros(N_MOTOR)
 
+action = np.array([0,0,0,0])
 sim_dur_step = int(cfg.simulation_duration_s/cfg.dt)
 
 for i in range(sim_dur_step):
@@ -92,16 +85,30 @@ for i in range(sim_dur_step):
     # initialize neuron voltage
     """
     (1*c)(c*r)
+    input image (channel, height, width)
     """
-    mf, terminated, truncated, info = Environment(cfg)
+    mf, terminated, truncated, info = env.step
     
-    for r in range(r):
+    for h in range(5):
+        for w in range(5):
+            print(:2d, end=" ")
+        
+    
+    
+    
+    
+    
+    
+    
+    # FC
+    for r in range():
         for c in range(c):
             v_grc[r] += mf[c] * w_mf[c][r]
         if v_grc[r] >= 1:
             v_grc[r] -= 1
             s_grc[r] = 1
         v_grc -= v_grc/TAU_GRC
+        
 
         
     

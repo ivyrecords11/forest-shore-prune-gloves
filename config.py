@@ -6,7 +6,7 @@ class SimulationConfig:
     dt: float = 1e-3                            # 시뮬레이션 시간 간격 (ms) 1
     eta: float = 1e-3                           # 학습률 (alpha)
     seed: int = None                            # 난수 시드
-    T: int = 1        
+    T: int = 8       
     epsilon_start: float = 1
     epsilon_end: float = 0.00                       
 
@@ -41,9 +41,9 @@ class SimulationConfig:
 
     # TRAINING PARAMETERS
 
-    weight_init: str = "kaiming"
+    weight_init: str = "normal-1"
     # every reward scale is per second
-    simulation_duration_s: float = 5.0         # 각 에피소드 시뮬레이션 시간 (초)
+    simulation_duration_s: float = 10.0         # 각 에피소드 시뮬레이션 시간 (초)
     success_duration_s: float = 3.0             # 성공으로 간주할 연속 시간 (초)
     num_steps: int = 64                          # rollout length before an update
     success_reward_per_sec: float = 10000
@@ -56,11 +56,11 @@ class SimulationConfig:
 
     # MOTOR PARAMETERS
     n_motor: int = 4      # 제어할 모터 수
-    motor_mode: str = 'motor_neuron'                #motor_neuron or spikes
+    motor_mode: str = 'spikes'                #motor_neuron or spikes
     motor_decay: float = 8.0                        #모터뉴런 복구 계수
     motor_damping: float = 3.0                      #링버퍼 제어 x - 제어 신호 - 모터 사이 순간 기울기 완화
     motor_gain: float = 1.0                        # 모터 제어 신호 이득
-    motor_max_hinge_deg: float = 10.0                  # 판 최대 경사각 [deg]  
+    motor_max_hinge_deg: float = 5.0                  # 판 최대 경사각 [deg]  
     motor_window_time: float = 0.005
     motor_window_len: int = 5                    # [s] 모터가 반응을 합산할 시간창(예: 20ms)
     use_ema: bool = False                       # True면 EMA, False면 슬라이딩 평균
@@ -72,3 +72,5 @@ class CerebellarNetConfig(SimulationConfig):
     n_grc: int = 512     # 모형화된 과립세포 수
     n_pkj: int = 64        # 모형화된 푸르키네 세포 수
     n_cf: int = 8         # 모형화된 교세포 수
+    n_bkc: int = 8
+    n_goc: int = 8

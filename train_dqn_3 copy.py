@@ -217,7 +217,7 @@ def train_dqn(env, model, *,
     buffer_size = min(max_steps_per_ep * 50, 50000)
 
     if episodes is None:
-        episodes = 50
+        episodes = 10
     max_epochs = episodes  # 요청 코드와 호환
 
     apply_weight_init_from_cfg(model, cfg.weight_init)

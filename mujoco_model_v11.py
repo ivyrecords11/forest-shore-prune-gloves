@@ -70,7 +70,7 @@ class Environment(Env):
         # ball params
         self.ball_mass = cfg.ball_mass #(kg)
         self.ball_radius = ((3.0 * self.ball_mass) / (4.0 * math.pi * cfg.ball_density)) ** (1.0 / 3.0) if self.ball_mass else None #(m)
-        self.ball_mass_n : float = (self.ball_mass - 0.001) / 0.029 if self.ball_mass else None  # [0,1]로 정규화
+        self.ball_mass_n : float = self.ball_mass / 0.03 if self.ball_mass else None  # [0,1]로 정규화
         self.ball_density = cfg.ball_density
         #sensor params
         self.max_firing_rate = cfg.max_firing_rate  # Hz
@@ -363,12 +363,14 @@ class Environment(Env):
         dist_x = np.maximum(np.abs(ball_x_t - self.gx) - 0.015, 0)
         dist_y = np.maximum(np.abs(ball_y_t - self.gy) - 0.015, 0)
         dist2 = (dist_x ** 2 + dist_y ** 2) / 0.18
-        sigma = self.cfg.sigma*self.ball_radius  # 표준편차 = 반지름
+        sigma = self.cfg.sigma*(self.ball_radius/0.3)  # 표준편차 =sigma* 판 대 반지름 비
         f = torch.exp(-dist2 / (2.0 * sigma * sigma))
 
         # --- 발화율 및 per-step 확률 계산 (클램프 포함) ---
-        #r = torch.clamp((self.ball_mass_n * f) * self.max_firing_rate*self.dt, 0.0, self.max_firing_rate*self.dt)
-        p = torch.clamp(f*self.ball_mass_n*self.max_firing_rate*self.dt, 0.0, self.max_firing_rate*self.dt)
+        #r = torch.clamp((self.ball_mass_normalized * f) * self.max_firing_rate*self.dt, 0.0, self.max_firing_rate*self.dt)
+        f2 = f*self.ball_mass_n*self.max_firing_rate*self.dt
+
+        p = torch.clamp(f2, 0.0, self.max_firing_rate*self.dt)
 
         # --- Poisson 인코더: 한 번만 생성해 캐시 ---
         if not hasattr(self, "_poisson_encoder") or self._poisson_encoder is None:
