@@ -363,7 +363,7 @@ class Environment(Env):
         dist_x = np.maximum(np.abs(ball_x_t - self.gx) - 0.015, 0)
         dist_y = np.maximum(np.abs(ball_y_t - self.gy) - 0.015, 0)
         dist2 = (dist_x ** 2 + dist_y ** 2) / 0.18
-        sigma = self.cfg.sigma*(self.ball_radius/0.3)  # 표준편차 =sigma* 판 대 반지름 비
+        sigma = self.cfg.sigma*(self.ball_radius/0.3)  # 표준편차 =sigma* 판 대 반지름 비 *1/30
         f = torch.exp(-dist2 / (2.0 * sigma * sigma))
 
         # --- 발화율 및 per-step 확률 계산 (클램프 포함) ---
@@ -459,7 +459,7 @@ class Environment(Env):
         dist_from_target = (self.ball_x**2 + self.ball_y**2)*10000 #cm
         ball_vel = self.data.body("ball").cvel
         reward = -dist_from_target/250 * self.failure_penalty  # normalize
-        reward -= abs(ball_vel[2]) * 100 if abs(ball_vel[2]) > 0.05 else 0
+        #reward -= abs(ball_vel[2]) * 100 if abs(ball_vel[2]) > 0.05 else 0
         if DEBUG_STEP: print(f"[ENV] BALL Z VELOCITY: {ball_vel[2]}, penalty = {abs(ball_vel[2]) * 100 if abs(ball_vel[2]) > 0.1 else 0}")
 
         terminated = False        # terminated if stayed in center for success_timestep

@@ -15,7 +15,7 @@ class SimulationConfig:
     n_mf : int = 100                            # 센서 개수     
     max_firing_rate: float = 200                # 센서 최대 발화율 (Hz) 200
     transmitt_speed: float = 100                 # 신경 전송 속도 [m/s]
-    sigma: float = 1                         # 센서 노이즈 표준편차 - 반지름과 곱해짐
+    sigma: float = 3                         # 센서 노이즈 표준편차 - 반지름과 곱해짐
 
     # NEURONAL PARAMETERS
     tau_pre_ms: float = 5.0                     # STDP 전-시냅스 가중치 변화 시간상수 (ms)
@@ -37,7 +37,7 @@ class SimulationConfig:
     t_motor: float = 2
     th_pkj: float = 1.0
     # MODEL_PARAMETERS
-    inhibit_rate: float = 0.5
+    inhibit_rate: float = 0.25
     max_spont: float = 1.0
 
     # TRAINING PARAMETERS
@@ -57,13 +57,13 @@ class SimulationConfig:
 
     # MOTOR PARAMETERS
     n_motor: int = 4      # 제어할 모터 수
-    motor_mode: str = 'motor_neuron'                #motor_neuron or spikes
-    motor_decay: float = 64.0                        #모터뉴런 복구 계수
+    motor_mode: str = 'spikes'                #motor_neuron or spikes
+    motor_decay: float = 8.0                        #모터뉴런 복구 계수
     motor_damping: float = 5.0                      #링버퍼 제어 x - 제어 신호 - 모터 사이 순간 기울기 완화
     motor_gain: float = 1.0                        # 모터 제어 신호 이득
     motor_max_hinge_deg: float = 10.0                  # 판 최대 경사각 [deg]  
-    motor_window_time: float = 0.005
-    motor_window_len: int = 5                    # [s] 모터가 반응을 합산할 시간창(예: 20ms)
+    motor_window_time: float = 0.02
+    motor_window_len: int = 20                    # [s] 모터가 반응을 합산할 시간창(예: 20ms)
     use_ema: bool = False                       # True면 EMA, False면 슬라이딩 평균
     ema_alpha: float = 0.5
     #ema = alpha * new_value + (1 - alpha) * old_ema    

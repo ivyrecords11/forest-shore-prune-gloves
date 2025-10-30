@@ -89,9 +89,24 @@ for i in range(sim_dur_step):
     """
     mf, terminated, truncated, info = env.step
     
+    # enqueue mf
+    # [6:0]queue_mf[7]
+    queue_mf = []
+    queue_ptr_mf == 0
+    
+    
+    mf.reshape(100)
+    for spike in mf:
+        if spike:
+            
+            queue_ptr_mf +=1
+    #mf2grc
     for h in range(5):
         for w in range(5):
-            print(:2d, end=" ")
+            if DEBUG: print(f"{5*h+w:2d}", end=" ")
+            
+        print()
+            
         
     
     

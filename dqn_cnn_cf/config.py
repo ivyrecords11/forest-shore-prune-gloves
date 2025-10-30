@@ -4,7 +4,7 @@ from dataclasses import dataclass
 class SimulationConfig:
     # SIMULATION PARAMETERS
     dt: float = 1e-3                            # 시뮬레이션 시간 간격 (ms) 1
-    eta: float = 3e-3                           # 학습률 (alpha)
+    eta: float = 3e-4                           # 학습률 (alpha)
     seed: int = None                            # 난수 시드
     T: int = 8       
     epsilon_start: float = 1
@@ -44,9 +44,9 @@ class SimulationConfig:
 
     weight_init: str = "kaiming"
     # every reward scale is per second
-    simulation_duration_s: float = 10.0         # 각 에피소드 시뮬레이션 시간 (초)
+    simulation_duration_s: float = 3.0         # 각 에피소드 시뮬레이션 시간 (초)
     success_duration_s: float = 3.0             # 성공으로 간주할 연속 시간 (초)
-    num_steps: int = 128                          # rollout length before an update
+    num_steps: int = 1                          # rollout length before an update
     success_reward_per_sec: float = 10000
     penalize_failure_per_sec: float = 10000
 
@@ -58,10 +58,10 @@ class SimulationConfig:
     # MOTOR PARAMETERS
     n_motor: int = 4      # 제어할 모터 수
     motor_mode: str = 'motor_neuron'                #motor_neuron or spikes
-    motor_decay: float = 64.0                        #모터뉴런 복구 계수
+    motor_decay: float = 32.0                        #모터뉴런 복구 계수
     motor_damping: float = 5.0                      #링버퍼 제어 x - 제어 신호 - 모터 사이 순간 기울기 완화
     motor_gain: float = 1.0                        # 모터 제어 신호 이득
-    motor_max_hinge_deg: float = 10.0                  # 판 최대 경사각 [deg]  
+    motor_max_hinge_deg: float = 5.0                  # 판 최대 경사각 [deg]  
     motor_window_time: float = 0.005
     motor_window_len: int = 5                    # [s] 모터가 반응을 합산할 시간창(예: 20ms)
     use_ema: bool = False                       # True면 EMA, False면 슬라이딩 평균

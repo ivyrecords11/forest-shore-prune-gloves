@@ -13,9 +13,6 @@ from config import SimulationConfig
 DEBUG_MONITOR = False
 cfg = SimulationConfig()
 
-"""
-사용중인 것들: cerebellarcnnac2
-"""
 
 class NonSpikingLIFNode(neuron.LIFNode):
     def __init__(self, *args, **kwargs):
@@ -168,14 +165,13 @@ class SpikingCNN(nn.Module):
             if isinstance(m, nn.Linear):
                 torch.nn.init.normal_(m.weight.data, mean = 1, std = 0.5)
             if isinstance(m, nn.Conv2d):
-                torch.nn.init.xavier_normal_(m.weight.data, mean = 1, std = 0.5)
+                torch.nn.init.normal_(m.weight.data, mean = 1, std = 0.5)
             if isinstance(m, neuron.LIFNode):
                 m.store_v_seq = False
-        c_grc = 64
-        c_goc = 8
+        c_goc = 4
+        c_grc = 32
+        c_bkc = 2
         c_pkj = 4
-        c_bkc = 16
-        c_pkj = 8
         n_pkj = c_pkj*4
         n_motor = 4
         
@@ -188,9 +184,9 @@ class SpikingCNN(nn.Module):
         self.pkj2motor  = nn.Linear(n_pkj, n_motor, bias=False)
         #self.cf2pkj     = nn.Linear()
         
-        self.grc = LIFNodeLFSR(tau=4.0, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.grc = LIFNodeLFSR(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True)
         self.goc = LIFNodeLFSR(tau=32.0, surrogate_function=surrogate.ATan(), detach_reset=True)
-        self.pkj = LIFNodeLFSR(tau=4.0, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.pkj = LIFNodeLFSR(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True)
         self.bkc = LIFNodeLFSR(tau=8.0, surrogate_function=surrogate.ATan(), detach_reset=True)
         self.motor =NonSpikingLIFNode(tau=cfg.motor_decay, surrogate_function=surrogate.ATan(), detach_reset=True)
         

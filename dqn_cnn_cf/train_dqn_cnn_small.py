@@ -1,11 +1,5 @@
-# dqn_train_cfg.py
-
-
-# validate_dqn.py
 import os, time, argparse, csv, math, random, collections, gc
 import sys
-
-# 현재 파일 기준으로 상위 폴더 경로 추가
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(parent_dir)
 from mujoco_model_v11 import Environment  # 예: model.py 안의 MyModel 클래스
@@ -15,7 +9,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-
 import time, csv
 from datetime import datetime
 from torch.nn.utils import clip_grad_norm_
@@ -23,7 +16,14 @@ from torch.distributions import Bernoulli, Normal
 from spikingjelly.activation_based import functional, neuron, surrogate, monitor
 from config import SimulationConfig
 from utils_logger import SpikeHeatmap, SpikePlotter, PotentialPlotter
+
+
+
+
 cfg = SimulationConfig()
+DIR = "./dqn_cnn_cf/TRAIN_DQN_CNN"
+
+
 
 # =========================
 # 1) CFG 로드 & 시드 고정
@@ -302,6 +302,7 @@ def train_dqn(env, model, *,
             logger_output_v.clear()
             logger_heatmap.clear()
             del logger_output_v, logger_heatmap'''
+        env.close
         functional.reset_net(model)
         duration = steps
         total_reward = ep_reward
@@ -342,10 +343,7 @@ def train_dqn(env, model, *,
             storage.clear()
 
         # env.close_viewer() (있을 때만)
-        close_viewer = getattr(env, "close_viewers", None)
-        if callable(close_viewer):
-            try: close_viewer()
-            except Exception: pass
+        env.close_viewer()
 
         if DEBUG: print("[TRAIN] Training complete.")
         # Save
@@ -401,7 +399,7 @@ def train_dqn(env, model, *,
                 pass
 
 def main():
-    DIR = "./dqn_cnn_small_mliconv/TRAIN_DQN_CNN_SMALL"
+    
     os.makedirs(DIR, exist_ok=True)
     env = Environment(cfg=cfg, render = True)
     model = SpikingCNN()
