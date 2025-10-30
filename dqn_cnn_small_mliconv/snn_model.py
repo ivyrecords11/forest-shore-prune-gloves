@@ -103,7 +103,7 @@ class LIFNodeLFSR(neuron.LIFNode):
                  backend='torch',
                  store_v_seq: bool = False,
                  lfsr_seed: int = 0xACE1,
-                 max_spont: float = 0.125):
+                 max_spont: float = cfg.max_spont):
         super().__init__(tau=tau,
                          decay_input=decay_input,
                          v_threshold=v_threshold,
@@ -166,14 +166,14 @@ class SpikingCNN(nn.Module):
         
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                torch.nn.init.xavier_normal_(m.weight.data)
+                torch.nn.init.normal_(m.weight.data, mean = 1, std = 0.5)
             if isinstance(m, nn.Conv2d):
-                torch.nn.init.xavier_normal_(m.weight.data)
+                torch.nn.init.xavier_normal_(m.weight.data, mean = 1, std = 0.5)
             if isinstance(m, neuron.LIFNode):
                 m.store_v_seq = False
-        c_grc = 64 
-        c_goc = 8  
-        c_pkj = 8
+        c_grc = 64
+        c_goc = 8
+        c_pkj = 4
         c_bkc = 16
         c_pkj = 8
         n_pkj = c_pkj*4
@@ -186,6 +186,7 @@ class SpikingCNN(nn.Module):
         self.bkc2pkj    = nn.Conv2d(c_bkc, c_pkj, kernel_size = 2, stride = 1, padding = 0, bias=False) #depthwise conv
         self.pf2pkj     = nn.Conv2d(c_grc, c_pkj, kernel_size = 3, stride = 2, padding = 0, bias=False) #2,2
         self.pkj2motor  = nn.Linear(n_pkj, n_motor, bias=False)
+        #self.cf2pkj     = nn.Linear()
         
         self.grc = LIFNodeLFSR(tau=4.0, surrogate_function=surrogate.ATan(), detach_reset=True)
         self.goc = LIFNodeLFSR(tau=32.0, surrogate_function=surrogate.ATan(), detach_reset=True)
@@ -194,10 +195,10 @@ class SpikingCNN(nn.Module):
         self.motor =neuron.LIFNode(tau=cfg.motor_decay, surrogate_function=surrogate.ATan(), detach_reset=True)
         
         A = torch.tensor([
-            [0,1,0,0],
-            [1,0,0,0],
-            [0,0,0,1],
-            [0,0,1,0],
+            [0,1,.5,.5],
+            [1,0,.5,.5],
+            [.5,.5,0,1],
+            [.5,.5,1,0],
         ], dtype=torch.float32) # 반대방향 inhibit
         self.register_buffer("A_mask", A)
         self.log = log
@@ -213,9 +214,11 @@ class SpikingCNN(nn.Module):
         motor = self.motor(pkj2motor)
         #Lateral Inhibition
         inh = motor @ self.A_mask
-        self.motor.v = self.motor.v - cfg.inhibit_rate * inh #alpha
-        return motor + self.motor.v
+        output = motor + self.motor.v
+        self.motor.v -= cfg.inhibit_rate * inh #alpha
         
+        return output
+    
 if __name__ == "__main__":
     scnn = SpikingCNN()
     input_shape = (1,1,10,10)
@@ -225,4 +228,8 @@ if __name__ == "__main__":
     param_names = [name for name in scnn.state_dict().keys()]
     for pn in param_names:
         print(pn, scnn.state_dict()[pn].shape)
+    input_tensor = torch.zeros((1, 1, 10, 10), dtype=torch.float)
+
+    scnn.forward(input_tensor)
+    print(scnn.grc.v)
     

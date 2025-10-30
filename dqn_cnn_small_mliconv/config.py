@@ -38,6 +38,7 @@ class SimulationConfig:
     th_pkj: float = 1.0
     # MODEL_PARAMETERS
     inhibit_rate: float = 0.5
+    max_spont: float = 1.0
 
     # TRAINING PARAMETERS
 
