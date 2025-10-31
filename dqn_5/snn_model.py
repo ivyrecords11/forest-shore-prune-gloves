@@ -219,26 +219,84 @@ class SpikingCNN(nn.Module):
         
         return output
     
+import math
+import torch
+import torch.nn as nn
+
+import math
+import torch
+import torch.nn as nn
+
+def spike_pos_init_(
+    weight,
+    fan_in: float = None,
+    *,
+    in_channels: int = None,
+    kernel_size=None,
+    stride=1,
+    tau: float = 1.0,
+    gain: float = 1.0,
+    base_mean: float = 0.02,
+    clamp_min: float = 0.0,
+    p_active: float = 1.0,   # 👈 발화 확률 (스파스 보정)
+):
+    # 1) fan_in 계산
+    if fan_in is None:
+        if in_channels is None or kernel_size is None:
+            raise ValueError("Either fan_in or (in_channels, kernel_size) must be provided.")
+
+        if isinstance(kernel_size, int):
+            k_h = k_w = kernel_size
+        else:
+            k_h, k_w = kernel_size
+
+        if isinstance(stride, int):
+            s_h = s_w = stride
+        else:
+            s_h, s_w = stride
+
+        fan_in = (in_channels * k_h * k_w) / (s_h * s_w)
+
+    # 2) tau, p_active 보정
+    tau = max(float(tau), 1.0)
+    #p_active = max(float(p_active), 1e-4)   # 0 방지
+    
+
+    # 👇 핵심: 스파스하면 effective fan_in을 p_active만큼 줄여서 std를 키운다
+    effective_fan_in = fan_in * p_active
+
+    # 3) std 계산
+    std = 0.5 * gain / math.sqrt(effective_fan_in * tau)
+
+    # 4) mean도 tau에 따라 줄이되, 너무 말라버리면 다시 살짝 올린다
+    mean = base_mean / math.sqrt(tau)
+
+    nn.init.normal_(weight, mean=mean, std=std)
+
+    if clamp_min is not None:
+        weight.data.clamp_(min=clamp_min)
+
 
 class SpikingCNNsmall(nn.Module):
-    def __init__(self, 
-                 T=cfg.T, 
-                 log = False):
+    def __init__(self, log = False):
         super(SpikingCNNsmall, self).__init__()
-        
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                torch.nn.init.kaiming_normal(m.weight.data, mode='fan_out')
+                torch.nn.init.normal(m.weight.data, 1, 0.0001)
             if isinstance(m, nn.Conv2d):
-                torch.nn.init.kaiming_normal(m.weight.data, mode='fan_out')
+                torch.nn.init.normal(m.weight.data, 1, 0.0001)
             if isinstance(m, neuron.LIFNode):
                 m.store_v_seq = False
-        c_grc = 16
-        c_goc = 2
-        c_bkc = 1
-        c_pkj = 2
+        c_grc = cfg.c_grc
+        c_goc = cfg.c_goc
+        c_bkc = cfg.c_bkc
+        c_pkj = cfg.c_pkj
         n_pkj = c_pkj*4
         n_motor = 4
+        t_grc = cfg.t_grc
+        t_goc = cfg.t_goc
+        t_pkj = cfg.t_pkj
+        t_bkc = cfg.t_bkc
         
         self.mf2goc     = nn.Conv2d(1,     c_goc, kernel_size = 5, stride = 1, padding = 0, bias=False)
         self.goc2grc    = nn.Conv2d(c_goc, c_grc, kernel_size = 2, stride = 1, padding = 0, bias=False) 
@@ -247,38 +305,116 @@ class SpikingCNNsmall(nn.Module):
         self.bkc2pkj    = nn.Conv2d(c_bkc, c_pkj, kernel_size = 2, stride = 1, padding = 0, bias=False) #depthwise conv
         self.pf2pkj     = nn.Conv2d(c_grc, c_pkj, kernel_size = 3, stride = 2, padding = 0, bias=False) #2,2
         self.pkj2motor  = nn.Linear(n_pkj, n_motor, bias=False)
-        #self.cf2pkj     = nn.Linear()
         
-        self.grc = LIFNodeLFSR(tau=8.0, surrogate_function=surrogate.ATan(), detach_reset=True)
-        self.goc = LIFNodeLFSR(tau=32.0, surrogate_function=surrogate.ATan(), detach_reset=True)
-        self.pkj = LIFNodeLFSR(tau=8.0, surrogate_function=surrogate.ATan(), detach_reset=True)
-        self.bkc = LIFNodeLFSR(tau=16.0, surrogate_function=surrogate.ATan(), detach_reset=True)
-        self.motor =neuron.LIFNode(tau=cfg.motor_decay, surrogate_function=surrogate.ATan(), detach_reset=True)
+        init_mean = 10
+        init_gain = 0.1
+        p=0.002
+        spike_pos_init_(self.mf2goc.weight, p_active=p, in_channels=1,kernel_size=5,stride=1,tau=cfg.t_goc, base_mean=init_mean, gain=init_gain)
+        spike_pos_init_(self.goc2grc.weight,p_active=p, in_channels=c_goc,kernel_size=2,stride=1,tau=cfg.t_grc,base_mean=init_mean, gain=init_gain)
+        spike_pos_init_(self.mf2grc.weight,p_active=p,in_channels=1,kernel_size=2,stride=2,tau=cfg.t_grc,base_mean=init_mean, gain=init_gain)
+        spike_pos_init_(self.pf2bkc.weight,p_active=p,in_channels=c_grc,kernel_size=3,stride=1,tau=cfg.t_bkc,base_mean=init_mean, gain=init_gain)
+        spike_pos_init_(self.bkc2pkj.weight,p_active=p,in_channels=c_bkc,kernel_size=2,stride=1,tau=cfg.t_pkj,base_mean=init_mean, gain=init_gain)
+        spike_pos_init_(self.pf2pkj.weight,p_active=p,in_channels=c_grc,kernel_size=3,stride=2,tau=cfg.t_pkj,base_mean=init_mean, gain=init_gain)
+        spike_pos_init_(self.pkj2motor.weight,p_active=p, fan_in=n_pkj,tau=cfg.t_motor,base_mean=init_mean, gain=init_gain)
+                
+        self.grc = LIFNodeLFSR(tau=cfg.t_grc, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.goc = LIFNodeLFSR(tau=cfg.t_goc, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.pkj = LIFNodeLFSR(tau=cfg.t_pkj, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.bkc = LIFNodeLFSR(tau=cfg.t_bkc, surrogate_function=surrogate.ATan(), detach_reset=True)
+        #self.motor_spike =LIFNodeLFSR(tau=cfg.t_motor, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.motor_state =NonSpikingLIFNode(tau=cfg.motor_decay, surrogate_function=surrogate.ATan(), detach_reset=True)
         
         A = torch.tensor([
             [0,1,.25,.25],
-            [1,0,.1,.1],
+            [1,0,.25,.25],
             [.25,.25,0,1],
             [.25,.25,1,0],
         ], dtype=torch.float32) # 반대방향 inhibit
         self.register_buffer("A_mask", A)
         self.log = log
-        self.T = T #dummy
-        
     
     def forward(self, mf):
-        goc = -self.goc(self.mf2goc(mf))
+        goc =  -self.goc(self.mf2goc(mf))
         grc = self.grc(self.mf2grc(mf) + self.goc2grc(goc))
-        bkc = -self.bkc(self.pf2bkc(grc))
+        bkc =  -self.bkc(self.pf2bkc(grc))
         pkj = self.pkj(self.pf2pkj(grc) + self.bkc2pkj(bkc))
         pkj2motor = self.pkj2motor(torch.flatten(pkj, start_dim=1))
-        motor = self.motor(pkj2motor)
-        #Lateral Inhibition
-        inh = motor @ self.A_mask
-        output = motor + self.motor.v
-        self.motor.v -= cfg.inhibit_rate * inh #alpha
+        #motor_spike = self.motor_spike(pkj2motor)
+        motor_state = self.motor_state(pkj2motor) # accumulator. only for motor output - dont touch
+        #Lateral Inhibition - 학습 저하로 이어지는가?
+        inh = motor_state @ self.A_mask # 0 or 1 * mask
+        motor_state -= cfg.inhibit_rate * inh #alpha
         
-        return output
+        return motor_state
+    
+    def clip_weights(self):
+        for m in self.modules():
+            if isinstance(m, (nn.Conv2d, nn.Linear)):
+                m.weight.data.clamp_(0, None)
+    
+
+class SpikingCNNsimple(nn.Module):
+    def __init__(self, log = False):
+        super(SpikingCNNsmall, self).__init__()
+        
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                torch.nn.init.normal(m.weight.data, 0.01, 0.0001)
+            if isinstance(m, nn.Conv2d):
+                torch.nn.init.normal(m.weight.data, 0.01, 0.0001)
+            if isinstance(m, neuron.LIFNode):
+                m.store_v_seq = False
+        c_grc = cfg.c_grc
+        c_goc = cfg.c_goc
+        c_bkc = cfg.c_bkc
+        c_pkj = cfg.c_pkj
+        n_grc = cfg.c_grc*5*5
+        n_pkj = c_pkj*4
+        n_motor = 4
+        t_grc = cfg.t_grc
+        t_goc = cfg.t_goc
+        t_pkj = cfg.t_pkj
+        t_bkc = cfg.t_bkc
+        
+        self.mf2goc     = nn.Conv2d(1,     c_goc, kernel_size = 5, stride = 1, padding = 0, bias=False)
+        self.goc2grc    = nn.Conv2d(c_goc, c_grc, kernel_size = 2, stride = 1, padding = 0, bias=False) 
+        self.mf2grc     = nn.Conv2d(1,     c_grc, kernel_size = 2, stride = 2, padding = 0, bias=False)
+        self.grc2motor  = nn.Linear(n_grc, n_motor, bias=False)
+        #self.cf2pkj     = nn.Linear()
+        
+        self.grc = LIFNodeLFSR(tau=cfg.t_grc, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.goc = LIFNodeLFSR(tau=cfg.t_goc, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.motor_spike =LIFNodeLFSR(tau=cfg.t_motor, surrogate_function=surrogate.ATan(), detach_reset=True)
+        self.motor_state =NonSpikingLIFNode(tau=cfg.motor_decay, surrogate_function=surrogate.ATan(), detach_reset=True)
+        
+        A = torch.tensor([
+            [0,1,.25,.25],
+            [1,0,.25,.25],
+            [.25,.25,0,1],
+            [.25,.25,1,0],
+        ], dtype=torch.float32) # 반대방향 inhibit
+        self.register_buffer("A_mask", A)
+        self.log = log
+    
+    def forward(self, mf):
+        # self.goc(F.softplus(self.mf2goc(mf)))가 안되는 이유
+        #output 기준으로 softplus함.
+        #그냥 - 포함해서 
+        goc =  -self.goc(self.mf2goc(mf))
+        grc = self.grc(self.mf2grc(mf) + self.goc2grc(goc))
+        grc2motor = self.grc2motor(torch.flatten(grc, start_dim=1))
+        motor_spike = self.motor_spike(grc2motor)
+        motor_state = self.motor_state(motor_spike) # accumulator. only for motor output - dont touch
+        #Lateral Inhibition - 학습 저하로 이어지는가?
+        inh = motor_spike @ self.A_mask # 0 or 1 * mask
+        self.motor_spike.v -= cfg.inhibit_rate * inh #alpha
+        
+        return motor_state
+    
+    def clip_weights(self):
+        for m in self.modules():
+            if isinstance(m, (nn.Conv2d, nn.Linear)):
+                m.weight.data.clamp_(0, None)
     
 
 if __name__ == "__main__":
@@ -293,5 +429,5 @@ if __name__ == "__main__":
     input_tensor = torch.zeros((1, 1, 10, 10), dtype=torch.float)
 
     scnn.forward(input_tensor)
-    print(scnn.grc.v)
+    #print(scnn.grc.v)
     

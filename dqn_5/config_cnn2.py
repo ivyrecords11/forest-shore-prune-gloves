@@ -4,7 +4,7 @@ from dataclasses import dataclass
 class SimulationConfig:
     # SIMULATION PARAMETERS
     dt: float = 1e-3                            # 시뮬레이션 시간 간격 (ms) 1
-    eta: float = 3e-3                           # 학습률 (alpha)
+    eta: float = 3e-4                           # 학습률 (alpha)
     seed: int = None                            # 난수 시드
     T: int = 8       
     epsilon_start: float = 1
@@ -22,23 +22,33 @@ class SimulationConfig:
     tau_post_ms: float = 5.0                    # STDP 후-시냅스 가중치 변화 시간상수 (ms)
     tau_e_ms: float = 50                        # 시냅스 효율 시간상수 (s)
     tau: float = 4.0
-    t_pkj: float = 2.0
-    integral_decay: float = 16.0                #안씀
-
-    n_grc: int = 8 # num_filters, *36
-    n_goc: int = 2
-    n_pkj: int = 1
-    n_mli: int = 2
-    n_cf: int = 4
-
-    t_grc: float = 2
-    t_goc: float = 2 
-    t_mli: float = 2
-    t_motor: float = 2
-    th_pkj: float = 1.0
     # MODEL_PARAMETERS
-    inhibit_rate: float = 0.25
-    max_spont: float = 1.0
+
+    c_goc: int = 8
+    c_grc: int = 16
+    c_bkc: int = 4
+    c_pkj: int = 8
+    
+    f_goc: int = 5
+    f_grc: int = 2
+    f_g2g: int = 2
+    f_bkc: int = 3
+    f_pkj: int = 3
+    f_b2p: int = 2
+    
+    n_goc: int = c_goc*6*6
+    n_grc: int = c_grc*5*5
+    n_bkc: int = c_bkc*3*3
+    n_pkj: int = c_pkj*2*2
+    n_motor: int = 4      # 제어할 모터 수
+    
+    t_grc: float = 4.0
+    t_goc: float = 32.0
+    t_bkc: float = 8.0
+    t_pkj: float = 4.0
+    t_motor: float = 4.0
+    inhibit_rate: float = 0.0625
+    max_spont: float = 0.25
 
     # TRAINING PARAMETERS
 
@@ -56,11 +66,10 @@ class SimulationConfig:
     ball_density: int = 2000                    # kg/m^3, fe
 
     # MOTOR PARAMETERS
-    n_motor: int = 4      # 제어할 모터 수
     motor_mode: str = 'motor_neuron'                #motor_neuron or spikes
-    motor_decay: float =2.0                        #모터뉴런 복구 계수
     motor_damping: float = 2.0                      #링버퍼 제어 x - 제어 신호 - 모터 사이 순간 기울기 완화
-    motor_gain: float = 1.0                        # 모터 제어 신호 이득
+    motor_decay: float = 8.0                        #모터뉴런 복구 계수
+    motor_gain: float = 3.0                        # 모터 제어 신호 이득
     motor_max_hinge_deg: float = 10.0                  # 판 최대 경사각 [deg]  
     motor_window_time: float = 0.005
     motor_window_len: int = 5                    # [s] 모터가 반응을 합산할 시간창(예: 20ms)

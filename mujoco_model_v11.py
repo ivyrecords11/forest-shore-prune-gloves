@@ -336,11 +336,12 @@ class Environment(Env):
         """
         4개 가장자리 높이 -> (theta_x, theta_y, h0)
         z*: float (또는 텐서), Lx/Ly: 판 길이(m)
+        ALL PLUS!
         """
         Lx, Ly = self.cfg.plate_size, self.cfg.plate_size
         #if DEBUG: print(action_edge)
         zR, zL, zB, zF = (action_edge)*self.motor_gain
-        theta_x = (zB - zF) / Ly
+        theta_x = (zB - zF) / Ly # R-L
         theta_y = (zR - zL) / Lx
         h0 = -(zL + zR + zB + zF) / 4.0
         return theta_x, theta_y, h0
@@ -425,6 +426,7 @@ class Environment(Env):
         elif self.cfg.motor_mode=='motor_neuron':
             action_gain = self._edge_to_angles_height(action)
             self.data.ctrl = action_gain
+            
             if DEBUG_STEP: print("[ENV] ACTION / ACTION_GAIN:", action, action_gain)
         mj.mj_step(self.model, self.data) # xml에서 정의한 dt만큼 단일 스텝 진행
         if self.render: self.v.sync()

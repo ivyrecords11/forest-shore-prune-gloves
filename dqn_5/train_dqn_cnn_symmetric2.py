@@ -23,11 +23,9 @@ from torch.distributions import Bernoulli, Normal
 from spikingjelly.activation_based import functional, neuron, surrogate, monitor
 from config_cnn2 import SimulationConfig
 from utils_logger import SpikeHeatmap, SpikePlotter, PotentialPlotter
+from utils_csv import save_params_csv
 cfg = SimulationConfig()
 
-# =========================
-# 1) CFG 로드 & 시드 고정
-# =========================
 if cfg.seed is not None:
     random.seed(cfg.seed)
     np.random.seed(cfg.seed)
@@ -37,9 +35,6 @@ if cfg.seed is not None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(cfg.seed)
 
-# =========================
-# 2) 디바이스 선택
-# =========================
 def get_device():
     if hasattr(torch, "xpu") and torch.xpu.is_available():
         return torch.device("xpu")
@@ -47,9 +42,6 @@ def get_device():
         return torch.device("cuda")
     return torch.device("cpu")
 
-# =========================
-# 3) 리플레이 버퍼
-# =========================
 Transition = collections.namedtuple('Transition', ('s', 'a', 'r', 'ns', 'd'))
 
 class ReplayBuffer:
@@ -67,29 +59,15 @@ class ReplayBuffer:
         return s, a, r, ns, d
     def __len__(self): return len(self.buf)
 
-# =========================
-# 4) Q값(=actor 마지막 전위) 계산 유틸
-# =========================
 @torch.no_grad()
 def q_values_from_model(model, obs_batch):
-    # obs_batch: (B, 1, H, W)
     assert obs_batch.shape == (1,1,10,10), f"[!]obs_batch:{obs_batch}"
     model.train(False)
-    #functional.reset_net(model.actor)
     for _ in range(model.T):
-        #action = model.actor(obs_batch)
-        #print(obs_batch, action)
         q = model.forward(obs_batch)
     assert q[-1].shape == torch.Size([4]), f"q[0]: {q[0]}, q: {q}"
-    #print(q)
-    #print("==========================================================")
-    #print(action)
     return q[-1]# (B, n_actions)
 
-# =========================
-# 5) DQN 최적화 스텝
-# ========
-# 3=================
 def dqn_optimize(model, target, buffer, optimizer, batch_size, gamma, max_grad_norm, device):
     """
     Multi-output DQN update for vector controllers (e.g., 4 outputs).
@@ -102,29 +80,29 @@ def dqn_optimize(model, target, buffer, optimizer, batch_size, gamma, max_grad_n
 
     model.train(True)
 
-    # s: (B, 1, H, W), a: (B, A) [unused here], r: (B,), ns: (B, 1, H, W), d: (B,)
     s, a, r, ns, d = buffer.sample(batch_size)
     s, ns = s.to(device), ns.to(device)
     r, d  = r.to(device), d.to(device)
 
-    # --- Q(s):  T steps, use actor membrane potential as Q
-    #functional.reset_net(model.actor)
-    #for _ in range(model.T):
-    q_s = model.forward(s)
-    
-    #q_s = model.lif_out_actor.v  # (B, A), no tanh/no clip
+    if hasattr(model, "_apply_sym"):
+        q_s_list = []
+        for kind in ("orig", "lr", "ud", "both"):
+            q_s_list.append(model._apply_sym(s, kind))  
+        q_s = (q_s_list[0] + q_s_list[1] + q_s_list[2] + q_s_list[3]) * 0.25
+    else:
+        q_s = model.forward(s)
 
-    # --- Target Q(ns): elementwise TD target (no action argmax)
     with torch.no_grad():
-        #functional.reset_net(target.actor)
-        #for _ in range(target.T):
-        q_ns_target = target.forward(ns)
-        #q_ns_target = target.lif_out_actor.v  # (B, A)
-
+        if hasattr(target, "_apply_sym"):
+            q_ns_list = []
+            for kind in ("orig", "lr", "ud", "both"):
+                q_ns_list.append(target._apply_sym(ns, kind))
+            q_ns_target = (q_ns_list[0] + q_ns_list[1] + q_ns_list[2] + q_ns_list[3]) * 0.25
+        else:
+            q_ns_target = target.forward(ns)
         # y = r + gamma*(1-d)*q_ns_target, broadcast r,d to (B, A)
         y = r.unsqueeze(1) + gamma * (1.0 - d).unsqueeze(1) * q_ns_target  # (B, A)
 
-    # --- Loss over all elements
     loss = torch.nn.functional.smooth_l1_loss(q_s, y)
 
     optimizer.zero_grad(set_to_none=True)
@@ -133,12 +111,10 @@ def dqn_optimize(model, target, buffer, optimizer, batch_size, gamma, max_grad_n
         from torch.nn.utils import clip_grad_norm_
         clip_grad_norm_(model.parameters(), max_grad_norm)
     optimizer.step()
+    model.clip_weights()
 
     return float(loss.item())
 
-# =========================
-# 6) 타깃 네트 업데이트
-# =========================
 def soft_update(target, online, tau=0.01):
     with torch.no_grad():
         for tp, op in zip(target.parameters(), online.parameters()):
@@ -146,56 +122,14 @@ def soft_update(target, online, tau=0.01):
 
 def hard_update(target, online):
     target.load_state_dict(online.state_dict())
-
-
-# =========================
-# 7) ε-탐욕 정책
-# =========================
-
+    
 def select_action_epsilon_greedy(model, obs, eps, n_actions, device):
-    """
-    ε-greedy for multi-controller (e.g., 4 outputs).
-    Returns the raw Q-value vector (no clipping, no tanh).
-
-    - With probability ε, replace ONE random element with a random value.
-    - Otherwise, use the model output as-is.
-    """
     with torch.no_grad():
-        obs_t = torch.from_numpy(obs).float().unsqueeze(0).to(device)  # (1,1,H,W)
+        obs_t = torch.from_numpy(obs).float().unsqueeze(0).to(device) 
         assert obs_t.shape==(1,1,10,10), "[!] shape이 맞지 않음."
-        q_values = q_values_from_model(model, obs_t).squeeze(0)        # (n_actions,)
-        #assert q_values.shape == torch.Size([n_actions]), f"q_values.shape은 {q_values.shape}임"
-        # obs_batch도 가능, 근데 단일임.
-    # Convert to numpy for env
+        q_values = q_values_from_model(model, obs_t).squeeze(0)      
     action = q_values.clone()
-    '''
-    if random.random() < eps:
-        rand_idx = random.randint(0, n_actions - 1)
-        rand_val = random.uniform(float(q_values.min()), float(q_values.max()))
-        action[rand_idx] = rand_val
-        # optional debug:         print(f"[ε-greedy] Randomized controller[{rand_idx}] = {rand_val:.3f}")
-    '''
     return action.cpu().numpy()  # shape: (n_actions,)
-
-# =========================
-# 8) (선택) 가중치 초기화: cfg.weight_init 반영
-# =========================
-'''
-def apply_weight_init_from_cfg(model, weight_init: str):
-    wi = (weight_init or "").lower()
-    for m in model.modules():
-        if isinstance(m, (nn.Linear, nn.Conv2d)):
-            if "kaiming" in wi:
-                nn.init.kaiming_normal_(m.weight, nonlinearity='linear')
-            elif "xavier" in wi:
-                nn.init.xavier_normal_(m.weight, gain=1.0)
-            elif "normal-0" in wi:
-                nn.init.normal_(m.weight, mean=0.0, std=1.0)
-            # bias는 없음(질문 코드 기준 bias=False), 있으면 0으로
-            if getattr(m, "bias", None) is not None:
-                nn.init.zeros_(m.bias)
-
-'''
 
 class SymmetricQ(nn.Module):
     """
@@ -228,17 +162,16 @@ class SymmetricQ(nn.Module):
         if self.training:
             return self._apply_sym(obs, "orig")
 
-        # 평가 모드면 4개 평균
         q_orig = self._apply_sym(obs, "orig")
         q_lr   = self._apply_sym(obs, "lr")
         q_ud   = self._apply_sym(obs, "ud")
         q_both = self._apply_sym(obs, "both")
         return 0.25 * (q_orig + q_lr + q_ud + q_both)
+    
+    def clip_weights(self):
+        self.base.clip_weights()
 
 
-# =========================
-# 9) 학습 루프
-# =========================
 def train_dqn(env, model, *,
               episodes: int = None,
               gamma: float = 0.8,
@@ -266,10 +199,8 @@ def train_dqn(env, model, *,
     buffer_size = min(max_steps_per_ep * 50, 50000)
 
     if episodes is None:
-        episodes = 100
-    max_epochs = episodes  # 요청 코드와 호환
-
-    #apply_weight_init_from_cfg(model, cfg.weight_init)
+        episodes = 1000
+    max_epochs = episodes 
 
     from copy import deepcopy
     target = deepcopy(model).to(device)
@@ -318,7 +249,6 @@ def train_dqn(env, model, *,
             
             a = select_action_epsilon_greedy(model, obs, eps, n_actions, device)
             
-            #log
             '''if log_this:
                 logger_heatmap.save_spikes(obs)
                 logger_output_v.save_spikes(a)'''
@@ -346,7 +276,6 @@ def train_dqn(env, model, *,
                 if global_step % hard_update_interval == 0:
                     hard_update(target, model)
             
-
         '''if log_this:
             logger_output_v.plot()
             logger_heatmap.plot()
@@ -356,9 +285,8 @@ def train_dqn(env, model, *,
         functional.reset_net(model)
         duration = steps
         total_reward = ep_reward
-        entropy = float("nan")   # DQN에서는 의미 없음. 필요시 0.0로 대체 가능
-
-        # ball_pos, ball_mass 안전 추출
+        entropy = float("nan")  
+        
         ball_pos = info_init.get("ball_pos",np.nan)
         ball_mass = info_init.get("ball_mass", np.nan)
         ball_x_last = last_info.get("ball_x", np.nan)
@@ -392,56 +320,24 @@ def train_dqn(env, model, *,
         if storage is not None and hasattr(storage, "clear"):
             storage.clear()
 
-        # env.close_viewer() (있을 때만)
         env.close_viewer()
 
         if DEBUG: print("[TRAIN] Training complete.")
         # Save
         if (epoch)%1==0: 
-            # (디버깅용) state_dict 프린트
-
-            # CONFIG 저장
             with open(f"{DIR}/{trial_num}_train/CONFIG.txt", "w", encoding="utf-8") as file_config:
                 file_config.write(str(cfg))
             # 모델 가중치(pth)
             pth_path = f"{DIR}/{trial_num}_train/model_pth/model_params_{epoch}.pth"
             torch.save(model.state_dict(), pth_path)
+            save_params_csv(model.state_dict(), f"{DIR}/{trial_num}_train/model_csv/model_params_{epoch}.csv")
+                
 
-            # 모델 파라미터 CSV 저장(요청한 중첩 루프 형태 그대로)
-            with open(f"{DIR}/{trial_num}_train/model_csv/model_params_{epoch}.csv", "a", newline="") as file_params:
-                writer = csv.writer(file_params)
-                writer.writerow(["Layer", "Parameter Name", "Values"])
-                for name, param in model.state_dict().items():
-                    file_params.write(f"\n{name.split('.')[0]},{name}\n")
-                    arr = param.detach().cpu().numpy()
-                    # 원본 로직 유지(중첩 차원 펼치기)
-                    if arr.ndim >= 1:
-                        for items in arr:
-                            if getattr(items, "ndim", 0) >= 1:
-                                for it in items:
-                                    if getattr(it, "ndim", 0) >= 1:
-                                        for it2 in it:
-                                            if getattr(it2, "ndim", 0) >= 1:
-                                                for it3 in it2:
-                                                    file_params.write(f"{it3},")
-                                            else:
-                                                file_params.write(f"{it2}")
-                                            file_params.write("\n")
-                                    else:
-                                        file_params.write(f"{it}\n")
-                            else:
-                                file_params.write(f"{items}\n")
-                    else:
-                        file_params.write(f"{arr}\n")
-
-        # MANIFEST 업데이트
         with open(f"{DIR}/MANIFEST.csv", "a") as file_manifest:
             file_manifest.write(f"{trial_num},{total_reward},{cfg}\n")
 
         if DEBUG: print("[TRAIN] All data saved.")
-        # ===== 교체 끝 =====
 
-        # 에피소드 종료 정리
         '''
         if model.log:
             try:
@@ -450,15 +346,12 @@ def train_dqn(env, model, *,
                 pass'''
 
 def main():
-    DIR = "./dqn_5/symmetric_small/TRAIN"
+    DIR = "./dqn_5/symmetric2/TRAIN"
     os.makedirs(DIR, exist_ok=True)
     env = Environment(cfg=cfg, render = True)
     base = SpikingCNNsmall()
     model = SymmetricQ(base)
 
-    # -------------------------------
-    # 1. Prepare MANIFEST and trial
-    # -------------------------------
     start_epoch = 0
     trial_num = 0
 
@@ -476,7 +369,7 @@ def main():
 
     if last_trial_line:
         print(f"[TRAIN] Last trial found: {last_trial_line}")
-        c = "y"#input("[TRAIN] Continue on last trial? (y/n): ")
+        c = input("[TRAIN] Continue on last trial? (y/n): ")
         if c.lower() == "y":
             trial_num = int(last_trial_line.split(",")[0])
             # recover start epoch
@@ -502,21 +395,17 @@ def main():
         trial_num = 0
         print("[TRAIN] No previous trial found; starting new one.")
 
-    # -------------------------------
-    # 2. Prepare directories
-    # -------------------------------
     dir_path = f"{DIR}/{trial_num}_train"
     os.makedirs(dir_path, exist_ok=True)
     os.makedirs(os.path.join(dir_path, "plots"), exist_ok=True)
     os.makedirs(os.path.join(dir_path, "model_csv"), exist_ok=True)
     os.makedirs(os.path.join(dir_path, "model_pth"), exist_ok=True)
+    
+    if start_epoch == 0: save_params_csv(model.state_dict(), f"{DIR}/{trial_num}_train/model_csv/model_params_init.csv")
+    
 
     print(f"\n[TRAIN] Trial: {trial_num}")
     print(f"[TRAIN] Config: {cfg}")
-
-    # -------------------------------
-    # 4. Start training
-    # -------------------------------
     train_dqn(
         env,
         model,
