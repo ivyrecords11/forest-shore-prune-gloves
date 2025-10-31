@@ -40,7 +40,7 @@ Major Changes
 12. info에 motor_acc 반환 -> 없앰
 13. negative reward 없앴음-> 다시생김
 14. 반대방향의 큰 속도에 디버프 줌
-15. 기존 보상 메커니즘 제거, 중심에 가까이 움직인 만큼 보상
+15. poisson encoder 반환
 """
 
 
@@ -120,7 +120,6 @@ class Environment(Env):
         self._ring = np.zeros((self.window_len, self.n_motor), dtype=np.float32)
         self._ring_ptr = 0
         self._ring_sum = np.zeros(self.n_motor, dtype=np.float32)
-        self._last_vel = 0
         '''
         self.window_len = max(1, int(self.motor_acc / self.dt))  # 창 길이(스텝)
         # --- 슬라이딩 평균용 원형버퍼 (합계 O(1) 업데이트) ---
@@ -347,7 +346,7 @@ class Environment(Env):
         h0 = -(zL + zR + zB + zF) / 4.0
         return theta_x, theta_y, h0
     
-    def sensor_inputs(self, flatten=True):
+    def sensor_inputs(self, flatten=False):
         """
         OUTPUTS
             inputs: (100,100) spike encoded sensor inputs (torch.float32) if flatten=False
@@ -365,12 +364,12 @@ class Environment(Env):
         dist_x = np.maximum(np.abs(ball_x_t - self.gx) - 0.015, 0)
         dist_y = np.maximum(np.abs(ball_y_t - self.gy) - 0.015, 0)
         dist2 = (dist_x ** 2 + dist_y ** 2) / 0.18
-        sigma = self.cfg.sigma*(self.ball_radius/0.3)  # 표준편차 =sigma* 판 대 반지름 비
+        sigma = self.cfg.sigma*(self.ball_radius/0.3)  # 표준편차 =sigma* 판 대 반지름 비 *1/30
         f = torch.exp(-dist2 / (2.0 * sigma * sigma))
 
         # --- 발화율 및 per-step 확률 계산 (클램프 포함) ---
         #r = torch.clamp((self.ball_mass_normalized * f) * self.max_firing_rate*self.dt, 0.0, self.max_firing_rate*self.dt)
-        f2 = f*self.ball_mass_n*self.max_firing_rate*self.dt
+        f2 = f*self.ball_mass_n*self.max_firing_rate*self.dt 
 
         p = torch.clamp(f2, 0.0, self.max_firing_rate*self.dt)
 
@@ -379,22 +378,8 @@ class Environment(Env):
             self._poisson_encoder = encoding.PoissonEncoder()
         pe = self._poisson_encoder
 
-        inputs = pe(p)  # (n,n), torch.float32
-        if DEBUG_SENSOR: 
-            print(f"[ENV] SENSOR DEBUG")
-            #print(dist2)
-            #print(f.mean)
-            #print("firing Rate")
-            #print(r)
-            #print("firing prob(%)")
-            #print(p.mean)
-            print(inputs)
-
-        if flatten:
-            inputs = inputs.view(-1)           # (100,)
-        else:
-            inputs = inputs.view(n, n)         # (10,10)
-        return inputs
+        #inputs = pe(p)  # (n,n), torch.float32
+        return pe
     
     
     def step(self, action: np.ndarray):
@@ -459,10 +444,9 @@ class Environment(Env):
         
         # Velocity Rewards
         dist_from_target = (self.ball_x**2 + self.ball_y**2)*10000 #cm
-        self.last_dist_from_target
         ball_vel = self.data.body("ball").cvel
         reward = -dist_from_target/250 * self.failure_penalty  # normalize
-        reward -= abs(ball_vel[2]) * 100 if abs(ball_vel[2]) > 0.05 else 0
+        #reward -= abs(ball_vel[2]) * 100 if abs(ball_vel[2]) > 0.05 else 0
         if DEBUG_STEP: print(f"[ENV] BALL Z VELOCITY: {ball_vel[2]}, penalty = {abs(ball_vel[2]) * 100 if abs(ball_vel[2]) > 0.1 else 0}")
 
         terminated = False        # terminated if stayed in center for success_timestep

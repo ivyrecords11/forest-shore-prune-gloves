@@ -222,7 +222,7 @@ def train_dqn(env, model, *,
     buffer_size = min(max_steps_per_ep * 50, 50000)
 
     if episodes is None:
-        episodes = 30
+        episodes = 100
     max_epochs = episodes  # 요청 코드와 호환
 
     apply_weight_init_from_cfg(model, cfg.weight_init)
@@ -430,7 +430,7 @@ def main():
 
     if last_trial_line:
         print(f"[TRAIN] Last trial found: {last_trial_line}")
-        c = input("[TRAIN] Continue on last trial? (y/n): ")
+        c = "y"#input("[TRAIN] Continue on last trial? (y/n): ")
         if c.lower() == "y":
             trial_num = int(last_trial_line.split(",")[0])
             # recover start epoch
